@@ -1,7 +1,7 @@
 # SynapseLocator
   
 ### What SynapseLocator can do
-Find conjugated objects in two associated 3D images of slice neuronal cultures. Automatically draw ROIs, extract intensities, and do some calculations. Report results, create composite image and text output.
+Locates conjugated objects in two associated 3D images of either neuronal slice cultures or primary neuronal cell cultures. Automatically draws ROIs, extracts intensities, and does some calculations. Reports results, creates composite images and text output.
   
   ## Features  
       
@@ -11,7 +11,7 @@ Find conjugated objects in two associated 3D images of slice neuronal cultures. 
   
   ## Register
   
-  ## Find objects
+  ## Locate objects
   
   ## Analyze ROIs and report data
   
