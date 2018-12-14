@@ -1,17 +1,6 @@
 # SynapseLocator
   
-### What SynapseLocator can do
-Locates conjugated objects in two associated 3D images of either neuronal slice cultures or primary neuronal cell cultures. Automatically draws ROIs, extracts intensities, and does some calculations. Reports results, creates composite images and text output.
-  
-  ## Features  
-      
-  ## Installation  
-    
-  ## Load data
-  
-  ## Register
-  
-  ## Locate objects
-  
-  ## Analyze ROIs and report data
+## SynapseLocator application
+Repeated imaging of brain tissue at high spatial resolution is faced with minute movements and non-concordant positional changes of synapses. SynapseLocator is a versatile tool that combines many steps of image processing, non-rigid image registration, and spot localisation. Input data are typically 3D images from pre- and post-stimulation (square input images in form of interleaved two-channel data, scanimage format, scanimage.vidriotechnologies.com, 16-bit greyscale) for which numerical and graphical result data are produced. Input images are filtered and deconvolved which considerably improves registration and spot detection. By default, results are reported based on processed images. However, channel intensities for minimally (or non) pre-processed images are also reported.
+
   
