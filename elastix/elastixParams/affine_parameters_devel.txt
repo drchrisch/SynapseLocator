@@ -1,0 +1,381 @@
+// Example parameter file for affine registration
+// C-style comments: //
+
+// The internal pixel type, used for internal computations
+// Leave to float in general. 
+// NB: this is not the type of the input images! The pixel 
+// type of the input images is automatically read from the 
+// images themselves.
+// This setting can be changed to "short" to save some memory
+// in case of very large 3D images.
+(FixedInternalImagePixelType "float")
+(MovingInternalImagePixelType "float")
+//(FixedInternalImagePixelType "short")
+//(MovingInternalImagePixelType "short")
+
+// The dimensions of the fixed and moving image
+// NB: This has to be specified by the user. The dimension of
+// the images is currently NOT read from the images.
+// Also note that some other settings may have to specified
+// for each dimension separately.
+//(FixedImageDimension 2)
+//(MovingImageDimension 2)
+(FixedImageDimension 3)
+(MovingImageDimension 3)
+
+// Specify whether you want to take into account the so-called
+// direction cosines of the images. Recommended: true.
+// In some cases, the direction cosines of the image are corrupt,
+// due to image format conversions for example. In that case, you 
+// may want to set this option to "false".
+(UseDirectionCosines "true")
+
+// Whether transforms are combined by composition or by addition.
+// In generally, Compose is the best option in most cases.
+(HowToCombineTransforms "Compose")
+
+
+// **************** Main Components **************************
+// The following components should usually be left as they are:
+(Registration "MultiResolutionRegistration")
+
+// Interpolator: Select this interpolator as follows:													 
+(Interpolator "BSplineInterpolator")
+
+// BSplineInterpolationOrder: the order of the B-spline polynomial.
+// example: (BSplineInterpolationOrder 3 2 3)
+// The default order is 1. The parameter can be specified for each resolution.
+// If only given for one resolution, that value is used for the other resolutions as well.
+// I recommend you set the BSplineInterpolationOrder to 1. The current setting of 3 will introduce overshoot on a binary image. The BSplineInterpolationOrder is the interpolation order used during registration. The FinalBSplineInterpolationOrder should be set to 0 for binary images. That setting does not affect the registration accuracy, just the final warping.
+// (BSplineInterpolationOrder 1)
+(BSplineInterpolationOrder 3)
+
+// (ResampleInterpolator "FinalBSplineInterpolator")
+(ResampleInterpolator "FinalBSplineInterpolatorFloat")
+//Resampler: Select this resampler as follows:
+(Resampler "DefaultResampler")
+//(Resampler "CUDAResampler")
+// (Resampler "OpenCLResampler")
+//Resampler: Enable the OpenCL resampler as follows:
+// (OpenCLResamplerUseOpenCL "true")
+											  
+// These may be changed to Fixed/MovingSmoothingImagePyramid.
+// See the manual.
+// (FixedImagePyramid "OpenCLFixedGenericImagePyramid")
+// (MovingImagePyramid "OpenCLMovingGenericImagePyramid")																   
+// (OpenCLFixedGenericImagePyramidUseOpenCL "true")														   
+// (OpenCLMovingGenericImagePyramidUseOpenCL "true")														   
+(FixedImagePyramid "FixedRecursiveImagePyramid")
+(MovingImagePyramid "MovingRecursiveImagePyramid")
+//(FixedImagePyramid "FixedSmoothingImagePyramid")
+//(MovingImagePyramid "MovingSmoothingImagePyramid")
+// **************** Main Components **************************
+
+
+
+
+
+// ******************* Optimizer ****************************
+// The optimizer AdaptiveStochasticGradientDescent (ASGD) works quite ok in general. The Transform and Metric are important and need to be chosen careful for each application. See manual.
+(Optimizer "AdaptiveStochasticGradientDescent")
+
+//************ AdaptiveStochasticGradientDescent Params ****************************
+//MaximumNumberOfIterations: The maximum number of iterations in each resolution.
+// example: (MaximumNumberOfIterations 100 100 50)
+// Default/recommended value: 500. When you are in a hurry, you may go down to 250 for example. When you have plenty of time, and want to be absolutely sure of the best results, a setting of 2000 is reasonable. In general, 500 gives satisfactory results.
+(MaximumNumberOfIterations 500)
+
+// MaximumNumberOfSamplingAttempts: The maximum number of sampling attempts. Sometimes not enough corresponding samples can be drawn, upon which an exception is thrown. With this parameter it is possible to try to draw another set of samples.
+// example: (MaximumNumberOfSamplingAttempts 10 15 10)
+// Default value: 0, i.e. just fail immediately, for backward compatibility.
+(MaximumNumberOfSamplingAttempts 100)
+
+// AutomaticParameterEstimation: When this parameter is set to "true", many other parameters are calculated automatically: SP_a, SP_alpha, SigmoidMax, SigmoidMin, and SigmoidScale. In the elastix.log file the actually chosen values for these parameters can be found.
+// example: (AutomaticParameterEstimation "true")
+// Default/recommended value: "true". The parameter can be specified for each resolution, or for all resolutions at once.
+(AutomaticParameterEstimation "true")
+
+// UseAdaptiveStepSizes: When this parameter is set to "true", the adaptive step size mechanism described in the documentation of itk::AdaptiveStochasticGradientDescentOptimizer is used. The parameter can be specified for each resolution, or for all resolutions at once.
+// example: (UseAdaptiveStepSizes "true")
+// Default/recommend value: "true", because it makes the registration more robust. In case of using a RandomCoordinate sampler, with (UseRandomSampleRegion "true"), the adaptive step size mechanism is turned off, no matter the user setting.
+(UseAdaptiveStepSizes "true")
+
+// MaximumStepLength: Also called $\delta$. This parameter can be considered as the maximum voxel displacement between two iterations. The larger this parameter, the more aggressive the optimization. The parameter can be specified for each resolution, or for all resolutions at once.
+// The step size of the optimizer, in mm. By default the voxel size is used. which usually works well. In case of unusual high-resolution images (eg histology) it is necessary to increase this value a bit, to the size of the "smallest visible structure" in the image:
+// example: (MaximumStepLength 1.0)
+// Default: mean voxel spacing of fixed and moving image. This seems to work well in general. This parameter only has influence when AutomaticParameterEstimation is used.
+// The higher you set this, the more aggressive steps are taken.
+// (MaximumStepLength 7 5 3 3)
+(MaximumStepLength 5 3 2 1)
+// (MaximumStepLength 2.0)
+(MinimumStepLength 0)
+
+// SP_a: The gain $a(k)$ at each iteration $k$ is defined by
+// $a(k) = SP\_a / (SP\_A + k + 1)^{SP\_alpha}$.
+// SP_a can be defined for each resolution.
+// example: (SP_a 3200.0 3200.0 1600.0)
+// The default value is 400.0. Tuning this variable for you specific problem is recommended. Alternatively set the AutomaticParameterEstimation to "true". In that case, you do not need to specify SP_a. SP_a has no influence when AutomaticParameterEstimation is used.
+
+// SP_A: The gain $a(k)$ at each iteration $k$ is defined by
+// $a(k) = SP\_a / (SP\_A + k + 1)^{SP\_alpha}$.
+// SP_A can be defined for each resolution.
+// example: (SP_A 50.0 50.0 100.0)
+// The default/recommended value for this particular optimizer is 20.0.
+
+// SP_alpha: The gain $a(k)$ at each iteration $k$ is defined by
+// $a(k) = SP\_a / (SP\_A + k + 1)^{SP\_alpha}$.
+// SP_alpha can be defined for each resolution.
+// example: (SP_alpha 0.602 0.602 0.602)
+// The default/recommended value for this particular optimizer is 1.0. Alternatively set the AutomaticParameterEstimation to "true". In that case, you do not need to specify SP_alpha. SP_alpha has no influence when AutomaticParameterEstimation is used.
+
+// SigmoidMax: The maximum of the sigmoid function ( $f_{max}$). Must be larger than 0. The parameter can be specified for each resolution, or for all resolutions at once.
+// example: (SigmoidMax 1.0)
+// Default/recommended value: 1.0. This parameter has no influence when AutomaticParameterEstimation is used. In that case, always a value 1.0 is used.
+
+// SigmoidMin: The minimum of the sigmoid function ( $f_{min}$). Must be smaller than 0. The parameter can be specified for each resolution, or for all resolutions at once.
+// example: (SigmoidMin -0.8)
+// Default value: -0.8. This parameter has no influence when AutomaticParameterEstimation is used. In that case, the value is automatically determined, depending on the images, metric etc.
+
+// SigmoidScale: The scale/width of the sigmoid function ( $\omega$). The parameter can be specified for each resolution, or for all resolutions at once.
+// example: (SigmoidScale 0.00001)
+// Default value: 1e-8. This parameter has no influence when AutomaticParameterEstimation is used. In that case, the value is automatically determined, depending on the images, metric etc.
+
+// SigmoidInitialTime: the initial time input for the sigmoid ( $t_0$). Must be larger than 0.0. The parameter can be specified for each resolution, or for all resolutions at once.
+// example: (SigmoidInitialTime 0.0 5.0 5.0)
+// Default value: 0.0. When increased, the optimization starts with smaller steps, leaving the possibility to increase the steps when necessary. If set to 0.0, the method starts with with the largest step allowed.
+
+// NumberOfGradientMeasurements: Number of gradients N to estimate the average square magnitudes of the exact gradient and the approximation error. The parameter can be specified for each resolution, or for all resolutions at once.
+// example: (NumberOfGradientMeasurements 10)
+// Default value: 0, which means that the value is automatically estimated. In principle, the more the better, but the slower. In practice N=10 is usually sufficient. But the automatic estimation achieved by N=0 also works good. The parameter has only influence when AutomaticParameterEstimation is used.
+
+// NumberOfJacobianMeasurements: The number of voxels M where the Jacobian is measured, which is used to estimate the covariance matrix. The parameter can be specified for each resolution, or for all resolutions at once.
+// example: (NumberOfJacobianMeasurements 5000 10000 20000)
+// Default value: M = max( 1000, nrofparams ), with nrofparams the number of transform parameters. This is a rather crude rule of thumb, which seems to work in practice. In principle, the more the better, but the slower. The parameter has only influence when AutomaticParameterEstimation is used.
+// (NumberOfJacobianMeasurements 5000 10000 20000 40000)
+
+// NumberOfSamplesForExactGradient: The number of image samples used to compute the 'exact' gradient. The samples are chosen on a uniform grid. The parameter can be specified for each resolution, or for all resolutions at once.
+// example: (NumberOfSamplesForExactGradient 100000)
+// Default/recommended: 100000. This works in general. If the image is smaller, the number of samples is automatically reduced. In principle, the more the better, but the slower. The parameter has only influence when AutomaticParameterEstimation is used.
+// (NumberOfSamplesForExactGradient 100000)
+
+// ASGDParameterEstimationMethod: The ASGD parameter estimation method used in this optimizer. The parameter can be specified for each resolution.
+// example: (ASGDParameterEstimationMethod "Original")
+// or (ASGDParameterEstimationMethod "DisplacementDistribution")
+// Default: Original.
+(ASGDParameterEstimationMethod "Original")
+
+// MaximumDisplacementEstimationMethod: The suitable position selection method used only for displacement distribution estimation method. The parameter can be specified for each resolution.
+// example: (MaximumDisplacementEstimationMethod "2sigma")
+// or (MaximumDisplacementEstimationMethod "95percentile")
+// Default: 2sigma.
+
+// NoiseCompensation: Selects whether or not to use noise compensation. The parameter can be specified for each resolution, or for all resolutions at once.
+// example: (NoiseCompensation "true")
+// Default/recommended: true.
+// ******************* Optimizer ****************************
+
+
+
+
+
+// ******************* Transform ****************************
+// Transform: Select this transform as follows:
+(Transform "AffineTransform")
+
+// ******************* Transform Params ****************************
+// Scales: the scale factor between the rotations and translations, used in the optimizer.
+// example: (Scales 200000.0)
+// example: (Scales 100000.0 60000.0 ... 80000.0)
+// If only one argument is given, that factor is used for the rotations. If more than one argument is given, then the number of arguments should be equal to the number of parameters: for each parameter its scale factor. If this parameter option is not used, by default the rotations are scaled by a factor of 100000.0. See also the AutomaticScalesEstimation parameter.
+
+// AutomaticScalesEstimation: if this parameter is set to "true" the Scales parameter is ignored and the scales are determined automatically.
+// example: ( AutomaticScalesEstimation "true" )
+// Default: "false" (for backwards compatibility). Recommended: "true".
+// Only for Euler transform and affine transform
+(AutomaticScalesEstimation "true")
+
+// CenterOfRotation: an index around which the image is rotated.
+// example: (CenterOfRotation 128 128 90)
+// By default the CenterOfRotation is set to the geometric center of the image.
+
+// AutomaticTransformInitialization: whether or not the initial translation between images should be estimated as the distance between their centers.
+// example: (AutomaticTransformInitialization "true")
+// By default "false" is assumed. So, no initial translation.
+//(AutomaticTransformInitialization "true")
+(AutomaticTransformInitialization "false")
+
+// AutomaticTransformInitializationMethod: how to initialize this transform. Should be one of {GeometricalCenter, CenterOfGravity, Origins, GeometryTop}.
+// example: (AutomaticTransformInitializationMethod "CenterOfGravity")
+// By default "GeometricalCenter" is assumed.
+// Automatically guess an initial translation by aligning the geometric centers of the fixed and moving.
+// We did that already
+//(AutomaticTransformInitializationMethod "CenterOfGravity")
+(AutomaticTransformInitializationMethod "GeometricalCenter")
+// ******************* Transform ****************************
+
+
+
+
+
+
+// ************* Metrics ****************
+(Metric "AdvancedMattesMutualInformation")
+//(Metric "AdvancedNormalizedCorrelation")
+// ************* Metrics Params for AdvancedMattesMutualInformation ****************
+// NumberOfHistogramBins: The size of the histogram. Must be given for each resolution, or for all resolutions at once.
+// example: (NumberOfHistogramBins 32 32 64)
+// The default is 32 for each resolution.
+// Number of grey level bins in each resolution level, for the mutual information. 16 or 32 usually works fine.
+// You could also employ a hierarchical strategy:
+//(NumberOfHistogramBins 16 32 64)
+(NumberOfHistogramBins 64)
+
+// NumberOfFixedHistogramBins: The size of the histogram in the fixed dimension. Can be given for each resolution, or for all resolutions at once. If not given, NumberOfHistogramBins is used.
+// example: (NumberOfFixedHistogramBins 32 32 64)
+// The default is the value of NumberOfHistogramBins, or, if that one is also not given, 32.
+(NumberOfFixedHistogramBins 64)
+
+// NumberOfMovingHistogramBins: The size of the histogram in the fixed dimension. Can be given for each resolution, or for all resolutions at once. If not given, NumberOfHistogramBins is used.
+// example: (NumberOfMovingHistogramBins 32 32 64)
+// The default is the value of NumberOfHistogramBins, or, if that one is also not given, 32.
+(NumberOfMovingHistogramBins 64)
+
+// FixedKernelBSplineOrder: The B-spline order of the Parzen window, used to estimate the joint histogram. Can be given for each resolution, or for all resolutions at once.
+// example: (FixedKernelBSplineOrder 0 1 1)
+// The default value is 0.
+
+// MovingKernelBSplineOrder: The B-spline order of the Parzen window, used to estimate the joint histogram. Can be given for each resolution, or for all resolutions at once.
+// example: (MovingKernelBSplineOrder 3 3 3)
+// The default value is 3.
+
+// FixedLimitRangeRatio: The relative extension of the intensity range of the fixed image.
+// If your fixed image has grey values from a to b and the FixedLimitRangeRatio is 0.001, the joint histogram will expect fixed image grey values from a-0.001(b-a) to b+0.001(b-a). This may be useful if you use high order B-spline interpolator for the fixed image.
+// example: (FixedLimitRangeRatio 0.001 0.01 0.01)
+// The default value is 0.01. Can be given for each resolution, or for all resolutions at once.
+
+// MovingLimitRangeRatio: The relative extension of the intensity range of the moving image.
+// If your moving image has grey values from a to b and the MovingLimitRangeRatio is 0.001, the joint histogram will expect moving image grey values from a-0.001(b-a) to b+0.001(b-a). This may be useful if you use high order B-spline interpolator for the moving image.
+// example: (MovingLimitRangeRatio 0.001 0.01 0.01)
+// The default value is 0.01. Can be given for each resolution, or for all resolutions at once.
+
+// FiniteDifferenceDerivative: Experimental feature, do not use.
+
+// UseFastAndLowMemoryVersion: Switch between a version of mutual information that explicitely computes the derivatives of the joint histogram to each transformation parameter (false) and a version that computes the mutual information via another route (true).
+// The first option allocates a large 3D matrix of size: NumberOfFixedHistogramBins * NumberOfMovingHistogramBins * number of affected B-spline parameters. This method is faster for a low number of parameters. The second method does not use this huge matrix,
+// and is therefore much more memory efficient for large images and fine B-spline grids. example: (UseFastAndLowMemoryVersion "false")
+// The default is "true".
+
+// Do not use in combination with (Transform "AffineTransform")!!!
+// We implemented the preconditioning technique by Nicholas Tustison: "Directly Manipulated Freeform Deformations".
+// It is currently only implemented for the AdvancedMattesMutualInformation metric, but it could be easily implemented
+// for other metrics. The preconditioning can be selected with the option:
+// (UseJacobianPreconditioning "true") 
+// ************* Metrics ****************
+
+
+
+
+// ******************* Similarity measure *********************
+// If you use a mask, this option is important. You can set it for each resolution differently.
+// If you do not use a mask, the option doesn't matter.
+// If the mask serves as region of interest, set it to false.
+//(ErodeMask "false" "false" "false")
+(ErodeMask "false")
+(ErodeFixedMask "false")
+(ErodeMovingMask "false")
+
+
+// ******************** Multiresolution **********************
+// The number of resolutions. 1 Is only enough if the expected
+// deformations are small. 3 or 4 mostly works fine. For large
+// images and large deformations, 5 or 6 may even be useful.
+(NumberOfResolutions 4)
+//(NumberOfResolutions 2)
+
+// **************** Image sampling **********************
+// Number of spatial samples used to compute the mutual
+// information (and its derivative) in each iteration.
+// With an AdaptiveStochasticGradientDescent optimizer,
+// in combination with the two options below, around 2000
+// samples may already suffice.
+//(NumberOfSpatialSamples 512)
+//(NumberOfSpatialSamples 2048)
+//(NumberOfSpatialSamples 2048)
+//(NumberOfSpatialSamples 20000 30000 80000)
+// (NumberOfSpatialSamples 8192 16384 65536 65536)
+// (NumberOfSpatialSamples 65536 65536 131072 262144)
+// (NumberOfSpatialSamples 65536)
+// (NumberOfSpatialSamples 8192 8192 8192 16384)
+// (NumberOfSpatialSamples 8192 16384 32768 65536)
+(NumberOfSpatialSamples 8192)
+(CheckNumberOfSamples "true")
+(RequiredRatioOfValidSamples 0.1 0.15 0.2 0.25)
+
+// Refresh these spatial samples in every iteration, and select
+// them randomly. See the manual for information on other sampling strategies.
+//(NewSamplesEveryIteration "true" "true" "true")
+(NewSamplesEveryIteration "true")
+//(ImageSampler "RandomSparseMask")
+(ImageSampler "Random")
+(UseRandomSampleRegion "true")
+
+
+
+
+// The downsampling/blurring factors for the image pyramids.
+// By default, the images are downsampled by a factor of 2
+// compared to the next resolution.
+// So, in 2D, with 4 resolutions, the following schedule is used:
+//(ImagePyramidSchedule 8 8  4 4  2 2  1 1 )
+// And in 3D:
+//(ImagePyramidSchedule 8 8 8  4 4 4  2 2 2  1 1 1 )
+// You can specify any schedule, for example:
+//(ImagePyramidSchedule 4 4  4 3  2 1  1 1 )
+//(ImagePyramidSchedule 2 2 2  1 1 1)
+// Make sure that the number of elements equals the number
+// of resolutions times the image dimension.
+//(FixedImagePyramidSchedule  2 2 2  1 1 1 )
+//(MovingImagePyramidSchedule  2 2 2  1 1 1 )
+//(NumberOfResolutions 3)
+//(FixedImagePyramidSchedule  2 2 2  1 1 1  0 0 0)
+//(MovingImagePyramidSchedule  2 2 2  1 1 1  0 0 0)
+//(NumberOfResolutions 4)
+(FixedImagePyramidSchedule  8 8 8  4 4 4  2 2 2  1 1 1)
+(MovingImagePyramidSchedule  8 8 8  4 4 4  2 2 2  1 1 1)
+
+
+
+
+// Order of B-Spline interpolation used for applying the final deformation.
+// 3 gives good accuracy; recommended in most cases.
+// 1 gives worse accuracy (linear interpolation)
+// 0 gives worst accuracy, but is appropriate for binary images
+// (masks, segmentations); equivalent to nearest neighbor interpolation.
+(FinalBSplineInterpolationOrder 3)
+
+
+
+
+
+
+//Default pixel value for pixels that come from outside the picture:
+(DefaultPixelValue 0)
+
+// Choose whether to generate the deformed moving image.
+// You can save some time by setting this to false, if you are
+// not interested in the final deformed moving image, but only
+// want to analyze the deformation field for example.
+// (WriteResultImage "true")
+(WriteResultImage "false")
+
+// The pixel type and format of the resulting deformed moving image
+//(ResultImagePixelType "short")
+// (ResultImagePixelType "double")
+(ResultImagePixelType "float")
+(ResultImageFormat "mhd")
+(CompressResultImage "false")
+
+(WriteTransformParametersEachIteration "false")
+(WriteTransformParametersEachResolution "false")
+(ShowExactMetricValue "false")
+
