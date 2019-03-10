@@ -1000,7 +1000,7 @@ function g0_threshold_edit_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 val = str2double(get(hObject,'String'));
-handles.synapseLocator_figure.UserData.sLobj.g1_threshold = val;
+handles.synapseLocator_figure.UserData.sLobj.g0_threshold = val;
 
 locatorParamsChanged(handles)
 
@@ -1012,7 +1012,7 @@ function g1_threshold_edit_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 val = str2double(get(hObject,'String'));
-handles.synapseLocator_figure.UserData.sLobj.g2_threshold = val;
+handles.synapseLocator_figure.UserData.sLobj.g1_threshold = val;
 
 locatorParamsChanged(handles)
 
