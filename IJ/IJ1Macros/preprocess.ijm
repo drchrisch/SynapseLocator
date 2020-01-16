@@ -99,7 +99,8 @@ function interleaveNsave(tmpName1, tmpName2, out_name) {
 /*
  * Start processing
  */
-print("\\Clear");
+
+print("\\Clear");
 
 /*
  * Clear open windows (if any)
@@ -126,15 +127,18 @@ if (args=="") {
 	Dialog.addCheckbox("Subtract Background", true);
 	Dialog.addCheckbox("Deconv", true);
 	Dialog.addNumber("Median Filter xy:", 1);
-	Dialog.addNumber("Median Filter z:", 1);
+	Dialog.addNumber("Median Filter z:", 0);
 	Dialog.addNumber("Gaussian sigma:", 0.5);
 	Dialog.addNumber("Bandpass min:", 2);
 	Dialog.addNumber("Bandpass max:", 25);
+	//Dialog.addNumber("Subtract Radius:", 250);
 	Dialog.addNumber("Subtract Radius:", 250);
 	Dialog.addNumber("PSF xy:", 0.4);
 	Dialog.addNumber("PSF z:", 2.0);
-	Dialog.addNumber("Deconv RF:", 0.01);
-	Dialog.addNumber("Voxel Size xy:", 0.146);
+	//Dialog.addNumber("Deconv RF:", 0.01);
+	Dialog.addNumber("Deconv RF:", 0.0001);
+	Dialog.addNumber("Voxel Size xy:", 0.2);
+	//Dialog.addNumber("Voxel Size xy:", 0.146);
 	Dialog.addNumber("Voxel Size z:", 0.5);
 	Dialog.show();
 	smoothing = Dialog.getChoice();
@@ -215,10 +219,10 @@ for (file_i=0; file_i<path2file.length; file_i++) {
 	name = File.getName(path2file[file_i]);
 	name_raw = substring(name, 0, lastIndexOf(name, ".tif")) + '_raw.tif';
 	name_mf = substring(name, 0, lastIndexOf(name, ".tif")) + '_mf.tif';
-	name_prepro = substring(name, 0, lastIndexOf(name, ".tif")) + '_prepro.tif';
+	name_proc = substring(name, 0, lastIndexOf(name, ".tif")) + '_proc.tif';
 	out_raw = path2out + File.separator + name_raw;
 	out_mf = path2out + File.separator + name_mf;
-	out_prepro = path2out + File.separator + name_prepro;
+	out_proc = path2out + File.separator + name_proc;
 	tmpName1="STACK1";
 	tmpName2="STACK2";
 
@@ -278,6 +282,17 @@ for (file_i=0; file_i<path2file.length; file_i++) {
 	 * parameters="x=" + medFilt[0] + " y=" + medFilt[1] + " z=" + medFilt[2];
 	 * run("Median 3D...", parameters);
 	 */
+	/*
+	if (doSmoothing) {
+		print("Median Filter");
+		selectWindow(tmpName1);
+		parameters="radius=" + doMedianFilterParams[0] + " stack";
+		run("Median...", parameters);
+
+		selectWindow(tmpName2);
+		parameters="radius=" + doMedianFilterParams[0] + " stack";
+		run("Median...", parameters);
+	*/
 	if (doSmoothing) {
 		print("Median Filter");
 		selectWindow(tmpName1);
@@ -331,7 +346,7 @@ for (file_i=0; file_i<path2file.length; file_i++) {
 		selectWindow(tmpName2);
 		run("Subtract Background...", parameters);
 	}
-*/
+ */
 
 	/*
 	 * Check for deconvolution step
@@ -367,7 +382,8 @@ for (file_i=0; file_i<path2file.length; file_i++) {
 		parameters += " -display no";
 		parameters += " -out stack STACKdeconv normalized short nosave";
 		parameters += " -constraint nonnegativity";
-		parameters += " -pad UNIFORM UNIFORM 32 32";
+		parameters += " -pad NO NO 32 32";
+		parameters += " -apo NO NO";
 		parameters += " -monitor no";
 		parameters += " -fft Academic";
 
@@ -399,7 +415,7 @@ for (file_i=0; file_i<path2file.length; file_i++) {
 	if (doBandpass || doSubtract || doDeconvolution) {
 		// Combine filtered data and save
 		print("Save preprocessed output");
-		interleaveNsave(tmpName1, tmpName2, out_prepro);
+		interleaveNsave(tmpName1, tmpName2, out_proc);
 		//counterFcn();
 	}
 

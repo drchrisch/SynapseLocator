@@ -6,33 +6,6 @@
  *
  */
 
-/*
- * Define functions
- */
-// function to count number of images and windows
-function counterFcn() {
-	it_list = getList("image.titles");
-	w_list = getList("window.titles");
-	print("Number of images: " + it_list.length + ", Number of windows: " + w_list.length);
-	
-	if (it_list.length==0)
-    	 print("No image windows are open");
-  	else {
-    	 print("Image windows:");
-    	 for (i=0; i<it_list.length; i++)
-        	print("   "+it_list[i]);
-  	}
-	print("");
-
-	if (w_list.length==0)
-    	 print("No non-image windows are open");
-  	else {
-    	 print("Non-image windows:");
-    	 for (i=0; i<w_list.length; i++)
-        	print("   "+w_list[i]);
-  	}
-	print("");	
-}
 
 /*
  * Start processing
@@ -64,8 +37,8 @@ if (args=="") {
  */
 dataPath=args[0];
 outPath=args[0]+File.separator+args[1];
-outPath1=args[0]+File.separator+replace(args[1],'Composite_prepro','G0R0_SLready');
-outPath2=args[0]+File.separator+replace(args[1],'Composite_prepro','G1R1_SLready');
+outPath1=args[0]+File.separator+replace(args[1],'Composite_proc','G0R0_SLready');
+outPath2=args[0]+File.separator+replace(args[1],'Composite_proc','G1R1_SLready');
 print("Starting gatherTifs macro with");
 print("Save output as: " + outPath);
 print("Save output #1 as: " + outPath1);
@@ -78,27 +51,26 @@ setBatchMode(true);
 /*
  * Open files
  */
+run("Conversions...", "scale");
+//run("Bio-Formats Macro Extensions");
 for (i=2; i<args.length; i++) {
 	open(dataPath+File.separator+args[i]);
+	//parameters="open=" + dataPath + File.separator + args[i];
+	//Ext.openImagePlus(dataPath+File.separator+args[i]);
+	//run("Bio-Formats Windowless Importer", parameters);
+	run("32-bit");
 }
-//counterFcn();
 
 /*
- * Increase SpineSummary and SignalSummary intensity
+ * Set contrast
  */
 list = getList("image.titles");
 for (i=0; i<(list.length); i++) {
 	selectImage(list[i]);
-	/* 	if (endsWith(list[i], 'Summary.tif')) {
-			run("Multiply...", "value=1000.000 stack");
-		}
-	*/	
 	resetMinAndMax();
 	run("Enhance Contrast", "saturated=0.35");
 	run(colors[i]);
 }
-//counterFcn();
-
 
 /*
  * Save all images and identified spots and signals as multichannel tif!
@@ -112,12 +84,11 @@ for (i=1; i<(list.length); i++) {
 parameters+=" create";
 run("Merge Channels...", parameters);
 saveAs("Tiff", outPath);
-//counterFcn();
 
 /*
- * Check input data for "prepro"and make SLready output!
+ * Check input data for "proc" and make SLready output!
 */
-if (matches(args[2], ".*prepro.*")){
+if (matches(args[2], ".*proc.*")){
 	// part 2a
 	run("Close All");
 	open(dataPath+File.separator+args[2]);
@@ -126,9 +97,8 @@ if (matches(args[2], ".*prepro.*")){
 	parameters="stack_1=" + list[0] + " stack_2=" + list[1];
 	run("Interleave", parameters);
 	saveAs("Tiff", outPath1);
-	//counterFcn();
 
-	// part 2a
+	// part 2ab
 	run("Close All");
 	open(dataPath+File.separator+args[4]);
 	open(dataPath+File.separator+args[5]);
@@ -136,7 +106,6 @@ if (matches(args[2], ".*prepro.*")){
 	parameters="stack_1=" + list[0] + " stack_2=" + list[1];
 	run("Interleave", parameters);
 	saveAs("Tiff", outPath2);
-	//counterFcn();
 }
 
 run("Close All");
