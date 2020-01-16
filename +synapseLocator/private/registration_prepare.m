@@ -8,6 +8,7 @@ function CMD = registration_prepare(sLobj)
 % drchrisch@gmail.com
 %
 % cs12dec2018
+% cs03dec2019
 %
 
 % Set relevant channels as pre and post ('target' and 'moved')!
@@ -29,7 +30,7 @@ targetFname = fullfile(sLobj.dataOutputPath, sLobj.elastixDataDir, 'target');
 movedFname = fullfile(sLobj.dataOutputPath, sLobj.elastixDataDir, 'moved');
 
 % Check required parameter set!
-ok_ = regexp(sLobj.elastixParamsSet, {'default|devel'}, 'start');
+ok_ = regexp(sLobj.elastixParamsSet, {'default|custom'}, 'start');
 ok_ = cat(1, ok_{:});
 if isempty(ok_)
     disp('Oooooops!!!!!!!!!!!!!!!!!!!!')
@@ -46,19 +47,17 @@ else
     end
 end
 
+
 % Check mask setting! Use mask (positive mask, 1 = voxels to keep, 0 = voxels to erode)!
-% mask_ = double(gt(sLobj.data.(target_channel), sLobj.data1Threshold));
-mask_ = uint8(gt(sLobj.data.(target_channel), int8(sLobj.data1Threshold)));
+mask_ = uint8(gt(sLobj.data.(target_channel), uint8(sLobj.data1Threshold)));
 targetMaskN = sum(mask_(:)); % Count 'active' voxels!
 targetMaskFile = fullfile(sLobj.dataOutputPath, sLobj.elastixDataDir, 'targetMask');
 mhd_write(double(mask_), targetMaskFile);
 
-% mask_ = double(gt(sLobj.data.(moved_channel), sLobj.data2Threshold));
-mask_ = uint8(gt(sLobj.data.(moved_channel), int8(sLobj.data2Threshold)));
+mask_ = uint8(gt(sLobj.data.(moved_channel), uint8(sLobj.data2Threshold)));
 movedMaskN = sum(mask_(:)); % Count 'active' voxels!
 movedMaskFile = fullfile(sLobj.dataOutputPath, sLobj.elastixDataDir, 'movedMask');
 mhd_write(double(mask_), movedMaskFile);
-    
 clear mask_
 
 % Set info text!
@@ -75,6 +74,7 @@ if sLobj.initialTransform
     % Modify registration params for choosen run mode!
     initialTransformParams_updateFcn(initialTransformParameterFile_tmp, sLobj.initialTransformParams, size(sLobj.data.G0))
 else
+    set(findobj(sLobj.sLFigH, 'Tag', 'initialOffset_edit'), 'String', []);
     initialTransformParameterFile_tmp = [];
 end
 
@@ -107,16 +107,29 @@ end
 
 switch sLobj.registrationRunMode
     case 'exhaustive'
-        exhaustive_rRM_Fcn({translationParameterFile_tmp, rotationParameterFile_tmp, affineParameterFile_tmp, elasticParameterFile_tmp}, sLobj.FGSIV, sLobj.histogramN, sLobj.resolutionsN, sLobj.apparentSimilarity, sLobj.labelDensity, stackSize_target, stackSize_moved, targetMaskN, movedMaskN, initialTransformParameterFile_tmp)
+        exhaustive_rRM_Fcn({translationParameterFile_tmp, rotationParameterFile_tmp, affineParameterFile_tmp, elasticParameterFile_tmp}, sLobj.FGSIV, sLobj.histogramN, sLobj.resolutionsN, sLobj.apparentSimilarity, sLobj.markerDensity, stackSize_target, stackSize_moved, targetMaskN, movedMaskN, initialTransformParameterFile_tmp)
     case 'default'
-        default_rRM_Fcn({translationParameterFile_tmp, rotationParameterFile_tmp, affineParameterFile_tmp, elasticParameterFile_tmp}, sLobj.FGSIV, sLobj.histogramN, sLobj.resolutionsN, sLobj.apparentSimilarity, sLobj.labelDensity, stackSize_target, stackSize_moved, targetMaskN, movedMaskN, initialTransformParameterFile_tmp)
+        default_rRM_Fcn({translationParameterFile_tmp, rotationParameterFile_tmp, affineParameterFile_tmp, elasticParameterFile_tmp}, sLobj.FGSIV, sLobj.histogramN, sLobj.resolutionsN, sLobj.apparentSimilarity, sLobj.markerDensity, stackSize_target, stackSize_moved, targetMaskN, movedMaskN, initialTransformParameterFile_tmp)
     case 'quick'
-        quick_rRM_Fcn({translationParameterFile_tmp, rotationParameterFile_tmp, affineParameterFile_tmp, elasticParameterFile_tmp}, sLobj.FGSIV, sLobj.histogramN, sLobj.resolutionsN, sLobj.apparentSimilarity, sLobj.labelDensity, stackSize_target, stackSize_moved, targetMaskN, movedMaskN, initialTransformParameterFile_tmp)
+        quick_rRM_Fcn({translationParameterFile_tmp, rotationParameterFile_tmp, affineParameterFile_tmp, elasticParameterFile_tmp}, sLobj.FGSIV, sLobj.histogramN, sLobj.resolutionsN, sLobj.apparentSimilarity, sLobj.markerDensity, stackSize_target, stackSize_moved, targetMaskN, movedMaskN, initialTransformParameterFile_tmp)
 end
 
-devel_ = regexp(sLobj.elastixParamsSet, {'_devel'}, 'match');
-if ~isempty(devel_{:})
-    rigidPenaltySetter(elasticParameterFile_tmp, targetMaskName, movedMaskName)
+% NOTE: There is a 'custom' set of elastix parameters available that can handle presence of rigid structures
+% that should not undergo elastic transformation! This basically is a stub
+% and there is no tool in SynapseLocator to define the rigid struture! We
+% use a dummy instead. See elastix documentation and this paper for more information:
+% "M. Staring, S. Klein and J.P.W. Pluim, 'A Rigidity Penalty Term for Nonrigid Registration', Medical Physics, vol. 34, no. 11, pp. 4098 - 4108, November 2007."
+custom_ = regexp(sLobj.elastixParamsSet, {'custom'}, 'match');
+if ~isempty(custom_{:})
+    rigid = floor(size(sLobj.data.(target_channel)) ./ [2,2,2]);
+    rigidMask = zeros(size(sLobj.data.(target_channel)), 'uint8');
+    rigidMask(1:rigid(1), 1:rigid(2), 1:rigid(3)) = 1;
+    targetRigidMaskFile = fullfile(sLobj.dataOutputPath, sLobj.elastixDataDir, 'targetRigidMask');
+    mhd_write(double(rigidMask), targetRigidMaskFile);
+    movedRigidMaskFile = fullfile(sLobj.dataOutputPath, sLobj.elastixDataDir, 'movedRigidMask');
+    mhd_write(double(rigidMask), movedRigidMaskFile);
+
+    rigidPenaltySetter(elasticParameterFile_tmp, targetRigidMaskFile, movedRigidMaskFile)
 end
 
 % Build the the appropriate command!
@@ -193,7 +206,7 @@ fgsiv_value = varargin{1};
 histogramN_value = varargin{2};
 numberOfResolutions = varargin{3};
 apparentSimilarity = varargin{4};
-labelDensity = varargin{5};
+markerDensity = varargin{5};
 stackSize_target = varargin{6};
 stackSize_moved = varargin{7};
 targetMaskN = varargin{8};
@@ -209,14 +222,9 @@ for fName_ = fName
     
     C = cat(1, C{:});
     
-%%%%%%%%%%%%%%%%%%
-    C = regexprep(C, '^(FixedInternalImagePixelType.*', '(FixedInternalImagePixelType "short")');
-    C = regexprep(C, '^(MovingInternalImagePixelType.*', '(MovingInternalImagePixelType "short")');
-    C = regexprep(C, '^(NumberOfResolutions.*', ['(NumberOfResolutions ', num2str(numberOfResolutions), ')']);
-%%%%%%%%%%%%%%%%%%
+    C = generalSettings(C, numberOfResolutions);
 
-    if isempty(initialTransformParameterFile_tmp)
-    else
+    if ~isempty(initialTransformParameterFile_tmp)
         newText = sprintf('(%s "%s")\n', 'InitialTransformParametersFileName',  initialTransformParameterFile_tmp);
         if isempty(strfind(fName_{:}, 'translation_par'))
             C = regexprep(C, '^InitialTransformParametersFileName.*', newText);
@@ -224,61 +232,58 @@ for fName_ = fName
     end
 
     if ~isempty(strfind(fName_{:}, 'translation_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
-        
         C = NiterSetter(C, 'exhaustive', 'translation', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
+        C = limitRangeRatioSetter(C, histogramN_value);
         C = stepLengthSetter(C, apparentSimilarity, 'translation', numberOfResolutions);
-        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^13, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
+        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         schedules = repelem((fliplr(2.^(0:(numberOfResolutions - 1)))), numberOfResolutions);
         C = regexprep(C, '^(GridSpacingSchedule.*', ['(GridSpacingSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FixedImagePyramidSchedule.*', ['(FixedImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, min([histogramN_value, 32])); % Set histogram
     end
     
     if ~isempty(strfind(fName_{:}, 'rotation_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
         C = NiterSetter(C, 'exhaustive', 'rotation', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
+        C = limitRangeRatioSetter(C, histogramN_value);
         C = stepLengthSetter(C, apparentSimilarity, 'rotation', numberOfResolutions);
-        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^13, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
+        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         schedules = repelem((fliplr(2.^(0:(numberOfResolutions - 1)))), numberOfResolutions);
         C = regexprep(C, '^(GridSpacingSchedule.*', ['(GridSpacingSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FixedImagePyramidSchedule.*', ['(FixedImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, min([histogramN_value, 32])); % Set histogram
     end
     
     if ~isempty(strfind(fName_{:}, 'affine_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
         C = NiterSetter(C, 'exhaustive', 'affine', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
+        C = limitRangeRatioSetter(C, histogramN_value);
         C = stepLengthSetter(C, apparentSimilarity, 'affine', numberOfResolutions);
-        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^13, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
+        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         schedules = repelem((fliplr(2.^(0:(numberOfResolutions - 1)))), numberOfResolutions);
         C = regexprep(C, '^(GridSpacingSchedule.*', ['(GridSpacingSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FixedImagePyramidSchedule.*', ['(FixedImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, min([histogramN_value, 32])); % Set histogram
     end
     
     if ~isempty(strfind(fName_{:}, 'elastic_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
         C = NiterSetter(C, 'exhaustive', 'elastic', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
+        C = limitRangeRatioSetter(C, histogramN_value);
         C = stepLengthSetter(C, apparentSimilarity, 'elastic', numberOfResolutions);
-        C = regexprep(C, '^(FixedLimitRangeRatio.*', '(FixedLimitRangeRatio 0.0)'); %default 0.01
-        C = regexprep(C, '^(MovingLimitRangeRatio.*', '(MovingLimitRangeRatio 0.0)'); %default 0.01        
         NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         C = regexprep(C, '^(NumberOfJacobianMeasurements.*', '(NumberOfJacobianMeasurements 100000)');
@@ -289,7 +294,7 @@ for fName_ = fName
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FinalGridSpacingInVoxels.*', ['(FinalGridSpacingInVoxels ', num2str(fgsiv_value), ')']);        
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, histogramN_value); % Set histogram
     end
         
@@ -307,7 +312,7 @@ fgsiv_value = varargin{1};
 histogramN_value = varargin{2};
 numberOfResolutions = varargin{3};
 apparentSimilarity = varargin{4};
-labelDensity = varargin{5};
+markerDensity = varargin{5};
 stackSize_target = varargin{6};
 stackSize_moved = varargin{7};
 targetMaskN = varargin{8};
@@ -323,76 +328,68 @@ for fName_ = fName
     
     C = cat(1, C{:});
     
-%%%%%%%%%%%%%%%%%%
-    C = regexprep(C, '^(FixedInternalImagePixelType.*', '(FixedInternalImagePixelType "short")');
-    C = regexprep(C, '^(MovingInternalImagePixelType.*', '(MovingInternalImagePixelType "short")');
-    C = regexprep(C, '^(NumberOfResolutions.*', ['(NumberOfResolutions ', num2str(numberOfResolutions), ')']);
-%%%%%%%%%%%%%%%%%%
+    C = generalSettings(C, numberOfResolutions);
 
-    if isempty(initialTransformParameterFile_tmp)
-    else
+    if ~isempty(initialTransformParameterFile_tmp)
         newText = sprintf('(%s "%s")\n', 'InitialTransformParametersFileName',  initialTransformParameterFile_tmp);
         if isempty(strfind(fName_{:}, 'translation_par'))
             C = regexprep(C, '^InitialTransformParametersFileName.*', newText);
         end
     end
     
-    if ~isempty(strfind(fName_{:}, 'translation_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
-        
+    if ~isempty(strfind(fName_{:}, 'translation_par'))        
         C = NiterSetter(C, 'default', 'translation', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
+        C = limitRangeRatioSetter(C, histogramN_value);
         C = stepLengthSetter(C, apparentSimilarity, 'translation', numberOfResolutions);
-        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^13, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
+        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         schedules = repelem((fliplr(2.^(0:(numberOfResolutions - 1)))), numberOfResolutions);
         C = regexprep(C, '^(GridSpacingSchedule.*', ['(GridSpacingSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FixedImagePyramidSchedule.*', ['(FixedImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, min([histogramN_value, 32])); % Set histogram
     end
     
     if ~isempty(strfind(fName_{:}, 'rotation_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
         C = NiterSetter(C, 'default', 'rotation', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
+        C = limitRangeRatioSetter(C, histogramN_value);
         C = stepLengthSetter(C, apparentSimilarity, 'rotation', numberOfResolutions);
-        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^13, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
+        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         schedules = repelem((fliplr(2.^(0:(numberOfResolutions - 1)))), numberOfResolutions);
         C = regexprep(C, '^(GridSpacingSchedule.*', ['(GridSpacingSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FixedImagePyramidSchedule.*', ['(FixedImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, min([histogramN_value, 32])); % Set histogram
     end
     
     if ~isempty(strfind(fName_{:}, 'affine_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
         C = NiterSetter(C, 'default', 'affine', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
+        C = limitRangeRatioSetter(C, histogramN_value);
         C = stepLengthSetter(C, apparentSimilarity, 'affine', numberOfResolutions);
-        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^13, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
+        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         schedules = repelem((fliplr(2.^(0:(numberOfResolutions - 1)))), numberOfResolutions);
         C = regexprep(C, '^(GridSpacingSchedule.*', ['(GridSpacingSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FixedImagePyramidSchedule.*', ['(FixedImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, min([histogramN_value, 32])); % Set histogram
     end
     
     if ~isempty(strfind(fName_{:}, 'elastic_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
         C = NiterSetter(C, 'default', 'elastic', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
         C = stepLengthSetter(C, apparentSimilarity, 'elastic', numberOfResolutions);
-        C = regexprep(C, '^(FixedLimitRangeRatio.*', '(FixedLimitRangeRatio 0.0)'); %default 0.01
-        C = regexprep(C, '^(MovingLimitRangeRatio.*', '(MovingLimitRangeRatio 0.0)'); %default 0.01        
+        C = limitRangeRatioSetter(C, histogramN_value);
         NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         C = regexprep(C, '^(NumberOfJacobianMeasurements.*', '(NumberOfJacobianMeasurements 100000)');
@@ -403,7 +400,7 @@ for fName_ = fName
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FinalGridSpacingInVoxels.*', ['(FinalGridSpacingInVoxels ', num2str(fgsiv_value), ')']);        
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, histogramN_value); % Set histogram
     end
         
@@ -421,7 +418,7 @@ fgsiv_value = varargin{1};
 histogramN_value = varargin{2};
 numberOfResolutions = varargin{3};
 apparentSimilarity = varargin{4};
-labelDensity = varargin{5};
+markerDensity = varargin{5};
 stackSize_target = varargin{6};
 stackSize_moved = varargin{7};
 targetMaskN = varargin{8};
@@ -437,76 +434,68 @@ for fName_ = fName
     
     C = cat(1, C{:});
     
-    %%%%%%%%%%%%%%%%%%
-    C = regexprep(C, '^(FixedInternalImagePixelType.*', '(FixedInternalImagePixelType "short")');
-    C = regexprep(C, '^(MovingInternalImagePixelType.*', '(MovingInternalImagePixelType "short")');
-    C = regexprep(C, '^(NumberOfResolutions.*', ['(NumberOfResolutions ', num2str(numberOfResolutions), ')']);
-    %%%%%%%%%%%%%%%%%%
+    C = generalSettings(C, numberOfResolutions);
     
-    if isempty(initialTransformParameterFile_tmp)
-    else
+    if ~isempty(initialTransformParameterFile_tmp)
         newText = sprintf('(%s "%s")\n', 'InitialTransformParametersFileName',  initialTransformParameterFile_tmp);
         if isempty(strfind(fName_{:}, 'translation_par'))
             C = regexprep(C, '^InitialTransformParametersFileName.*', newText);
         end
     end
     
-    if ~isempty(strfind(fName_{:}, 'translation_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
-        
+    if ~isempty(strfind(fName_{:}, 'translation_par'))        
         C = NiterSetter(C, 'quick', 'translation', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
+        C = limitRangeRatioSetter(C, histogramN_value);
         C = stepLengthSetter(C, apparentSimilarity, 'translation', numberOfResolutions);
-        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^13, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
+        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         schedules = repelem((fliplr(2.^(0:(numberOfResolutions - 1)))), numberOfResolutions);
         C = regexprep(C, '^(GridSpacingSchedule.*', ['(GridSpacingSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FixedImagePyramidSchedule.*', ['(FixedImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, min([histogramN_value, 32])); % Set histogram
     end
     
     if ~isempty(strfind(fName_{:}, 'rotation_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
         C = NiterSetter(C, 'quick', 'rotation', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
+        C = limitRangeRatioSetter(C, histogramN_value);
         C = stepLengthSetter(C, apparentSimilarity, 'rotation', numberOfResolutions);
-        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^13, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
+        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         schedules = repelem((fliplr(2.^(0:(numberOfResolutions - 1)))), numberOfResolutions);
         C = regexprep(C, '^(GridSpacingSchedule.*', ['(GridSpacingSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FixedImagePyramidSchedule.*', ['(FixedImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, min([histogramN_value, 32])); % Set histogram
     end
     
     if ~isempty(strfind(fName_{:}, 'affine_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
         C = NiterSetter(C, 'quick', 'affine', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
+        C = limitRangeRatioSetter(C, histogramN_value);
         C = stepLengthSetter(C, apparentSimilarity, 'affine', numberOfResolutions);
-        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^13, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
+        NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         schedules = repelem((fliplr(2.^(0:(numberOfResolutions - 1)))), numberOfResolutions);
         C = regexprep(C, '^(GridSpacingSchedule.*', ['(GridSpacingSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FixedImagePyramidSchedule.*', ['(FixedImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, min([histogramN_value, 32])); % Set histogram
     end
     
     if ~isempty(strfind(fName_{:}, 'elastic_par'))
-        C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
         C = NiterSetter(C, 'quick', 'elastic', numberOfResolutions);
-        C = ratioOfSamplesSetter(C, labelDensity);
+        C = ratioOfSamplesSetter(C, markerDensity);
+        C = limitRangeRatioSetter(C, histogramN_value);
         C = stepLengthSetter(C, apparentSimilarity, 'elastic', numberOfResolutions);
-        C = regexprep(C, '^(FixedLimitRangeRatio.*', '(FixedLimitRangeRatio 0.0)'); %default 0.01
-        C = regexprep(C, '^(MovingLimitRangeRatio.*', '(MovingLimitRangeRatio 0.0)'); %default 0.01
         NOSS = floor(min([prod(stackSize_target)./(linspace(100, 10, numberOfResolutions)); prod(stackSize_moved)./(linspace(100, 10, numberOfResolutions)); repmat(2^14, 1, numberOfResolutions); repmat(targetMaskN, 1, numberOfResolutions); repmat(movedMaskN, 1, numberOfResolutions)]));
         C = regexprep(C, '^(NumberOfSpatialSamples.*', ['(NumberOfSpatialSamples ', num2str(NOSS), ')']);
         C = regexprep(C, '^(NumberOfJacobianMeasurements.*', '(NumberOfJacobianMeasurements 100000)');
@@ -517,7 +506,7 @@ for fName_ = fName
         C = regexprep(C, '^(MovingImagePyramidSchedule.*', ['(MovingImagePyramidSchedule ', num2str(schedules), ')']);
         C = regexprep(C, '^(FinalGridSpacingInVoxels.*', ['(FinalGridSpacingInVoxels ', num2str(fgsiv_value), ')']);        
         C = samplerSetter(C, useMask); % Set image sampler type
-        C = bsplineSetter(C, [1,3,3]); % Adjust BSpline order
+        C = bsplineSetter(C, [3,3,3,3,0]); % Adjust BSpline order
         C = histogramSetter(C, histogramN_value); % Set histogram
     end    
     
@@ -528,26 +517,49 @@ end
 
 return
 
+function C = generalSettings(C, numberOfResolutions)
+% Set some params used in all operations!
+
+C = regexprep(C, '^(MaximumNumberOfSamplingAttempts.*', '(MaximumNumberOfSamplingAttempts 10)');
+C = regexprep(C, '^(FixedInternalImagePixelType.*', '(FixedInternalImagePixelType "short")');
+C = regexprep(C, '^(MovingInternalImagePixelType.*', '(MovingInternalImagePixelType "short")');
+C = regexprep(C, '^(NumberOfResolutions.*', ['(NumberOfResolutions ', num2str(numberOfResolutions), ')']);
+
+return
+
 function C = bsplineSetter(C, varargin)
+% Set b-spline order!
+
 orders = varargin{1};
+
     C = regexprep(C, '^(BSplineInterpolationOrder.*', ['(BSplineInterpolationOrder ', num2str(orders(1)), ')']);
     C = regexprep(C, '^(BSplineTransformSplineOrder.*', ['(BSplineTransformSplineOrder ', num2str(orders(2)), ')']);
-    C = regexprep(C, '^(FinalBSplineInterpolationOrder.*', ['(FinalBSplineInterpolationOrder ', num2str(orders(3)), ')']);
+
+    C = regexprep(C, '^(FixedKernelBSplineOrder.*', ['(FixedKernelBSplineOrder ', num2str(orders(3)), ')']);
+    C = regexprep(C, '^(MovingKernelBSplineOrder.*', ['(MovingKernelBSplineOrder ', num2str(orders(4)), ')']);
+
+    C = regexprep(C, '^(FinalBSplineInterpolationOrder.*', ['(FinalBSplineInterpolationOrder ', num2str(orders(5)), ')']);
+
 return
 
 function C = histogramSetter(C, histBins)
+% Set histogram N for elastic transformation!
+
 C = regexprep(C, '^(NumberOfHistogramBins.*', ['(NumberOfHistogramBins ', num2str(histBins), ')']);
 C = regexprep(C, '^(NumberOfFixedHistogramBins.*', ['(NumberOfFixedHistogramBins ', num2str(histBins), ')']);
 C = regexprep(C, '^(NumberOfMovingHistogramBins.*', ['(NumberOfMovingHistogramBins ', num2str(histBins), ')']);
+
 return
 
 function C = samplerSetter(C, varargin)
 useMask = varargin{1};
+
 if useMask
     C = regexprep(C, '^(ImageSampler.*', '(ImageSampler "RandomSparseMask")');
 else
     C = regexprep(C, '^(ImageSampler.*', '(ImageSampler "Random")');
 end
+
 return
 
 function C = stepLengthSetter(C, apparentSimilarity, param, numberOfResolutions)
@@ -555,8 +567,7 @@ function C = stepLengthSetter(C, apparentSimilarity, param, numberOfResolutions)
 % apparentSimilarity and number of resolutions (define start value successively by 2)! 
         
 % Order for each field: translation-rotation-affine-elastic!
-maxSL = struct('high', [2, 1, 0.5, 0.25], 'average', [3, 2, 1, 0.5], 'poor', [5, 3, 2, 1]);
-
+maxSL = struct('good', [2, 1, 0.5, 0.25], 'average', [3, 2, 1, 0.5], 'poor', [5, 3, 2, 1]);
 
 switch param
     case 'translation'
@@ -573,12 +584,30 @@ C = regexprep(C, '^(MinimumStepLength.*', ['(MinimumStepLength ', num2str(0), ')
 
 return
 
-function C = ratioOfSamplesSetter(C, labelDensity)
+function C = ratioOfSamplesSetter(C, markerDensity)
 % Define sets of RequiredRatioOfValidSamples values based on label sparsity!
 
-rrovs = struct('med', 0.05, 'low', 0.01, 'verylow', 0.001);
+rrovs = struct('high', 0.05, 'medium', 0.01, 'low', 0.001);
 
-C = regexprep(C, '^(RequiredRatioOfValidSamples.*', ['(RequiredRatioOfValidSamples ', num2str(rrovs.(labelDensity)), ')']);
+C = regexprep(C, '^(RequiredRatioOfValidSamples.*', ['(RequiredRatioOfValidSamples ', num2str(rrovs.(markerDensity)), ')']);
+
+return
+
+function C = limitRangeRatioSetter(C, histBins)
+% Define LimitRangeRatio!
+
+if histBins < 32
+    lrr = 0.2;
+elseif histBins >=32 && histBins < 128
+    lrr = 0.1;
+elseif histBins >=128 && histBins <= 256
+    lrr = 0.01;
+else
+    lrr = 0.0;
+end
+
+C = regexprep(C, '^(FixedLimitRangeRatio.*', ['(FixedLimitRangeRatio ', num2str(lrr), ')']); %default 0.01
+C = regexprep(C, '^(MovingLimitRangeRatio.*', ['(MovingLimitRangeRatio ', num2str(lrr), ')']); %default 0.01
 
 return
 

@@ -52,6 +52,7 @@ if ne(sum(ne([fD(:).isdir], 1)), 0) && ~strcmp(featureDataDir_old, sLobj.feature
         case 'Yes'
             copyfile(featureDataDir_old, sLobj.featureDataDir);
         case {'No', ''}
+            sLobj.featureNames_signalChannel = [];
     end
 end
 

@@ -38,7 +38,7 @@ if exist(dataOutputPath_, 'dir')
                     case 'Directory already exists.'
                     otherwise
                         status = 0;
-                        sLobj.sFH.Pointer = 'arrow';
+                        sLobj.sLFigH.Pointer = 'arrow';
                         errordlg(msg, 'mkdir error');
                         return
                 end
@@ -46,7 +46,7 @@ if exist(dataOutputPath_, 'dir')
         case 'NO'
             errordlg('Set new output dir name', 'New DirMessage');
             status = 0;
-            sLobj.sFH.Pointer = 'arrow';
+            sLobj.sLFigH.Pointer = 'arrow';
             return
     end
 else
@@ -55,7 +55,7 @@ else
         
         errordlg(msg, 'mkdir error');
         status = 0;
-        sLobj.sFH.Pointer = 'arrow';
+        sLobj.sLFigH.Pointer = 'arrow';
         return
     end
 end

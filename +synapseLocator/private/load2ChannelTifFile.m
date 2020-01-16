@@ -12,18 +12,18 @@ function load2ChannelTifFile(sLobj, whichOne)
 
 [~, name_, ~] = fileparts(sLobj.(['dataFile_', whichOne]));
 
-if sLobj.loadTransformed
-    copyfile(sLobj.(['dataFile_', whichOne]), fullfile(sLobj.dataOutputPath, sLobj.tmpImagesDir, [name_, '_prepro.tif']))
+if sLobj.loadRegisteredImages
+    copyfile(sLobj.(['dataFile_', whichOne]), fullfile(sLobj.dataOutputPath, sLobj.tmpImagesDir, [name_, '_proc.tif']))
 end
 
 tifFiles = tmpDirChecker(sLobj);
 [~, name_, ~] = fileparts(sLobj.(['dataFile_', whichOne]));
 
 
-% Load 3D data! Always try to load prepro data (should have undergone complete preprocessing)!
-if ischar(tifFiles(str2double(whichOne)).prepro)
-    % Load 'prepro' type data!
-    filename = fullfile(sLobj.dataOutputPath, sLobj.tmpImagesDir, [name_, '_prepro.tif']);
+% Load 3D data! Always try to load processed data (should have undergone complete preprocessing)!
+if ischar(tifFiles(str2double(whichOne)).proc)
+    % Load 'proc' type data!
+    filename = fullfile(sLobj.dataOutputPath, sLobj.tmpImagesDir, [name_, '_proc.tif']);
 elseif ischar(tifFiles(str2double(whichOne)).mf)
     % Load 'mf' type data!
     filename = fullfile(sLobj.dataOutputPath, sLobj.tmpImagesDir, [name_, '_mf.tif']);
@@ -47,10 +47,12 @@ if sLobj.upsampling
     [status, result] = system(CMD); %#ok<ASGLU>
     
     % Use ScanImageTiffReader! NOTE: ORIENTATION!!!
-    tmpData = flipud(rot90(ScanImageTiffReader(filename_out).data, 1));
+%     tmpData = flipud(rot90(ScanImageTiffReader(filename_out).data, 1));
+    tmpData = sLobj.tifLoader(filename_out);
 else
     % Use ScanImageTiffReader! NOTE: ORIENTATION!!!
-    tmpData = flipud(rot90(ScanImageTiffReader(filename).data, 1));
+%     tmpData = flipud(rot90(ScanImageTiffReader(filename).data, 1));
+    tmpData = sLobj.tifLoader(filename);
 end
 
 

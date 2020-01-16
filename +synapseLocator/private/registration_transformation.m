@@ -8,10 +8,9 @@ function registration_transformation(sLobj)
 % drchrisch@gmail.com
 %
 % cs12dec2018
+% cs03dec2019
 %
 
-% Set range for image match calculation!
-imr = [0.25, 0.75];
 
 warning('off', 'MATLAB:imagesci:tiffmexutils:libtiffWarning')
 
@@ -67,20 +66,24 @@ testSize = min([size(sLobj.data.G0); size(sLobj.data.G1)], [], 1);
 target_channel = [sLobj.leadingChannel, '0'];
 moved_channel = [sLobj.leadingChannel, '1'];
 tT = sLobj.data.(target_channel)(1:testSize(1), 1:testSize(2), 1:testSize(3));
-tT = imFcn(tT, imr);
 tM = sLobj.data.(moved_channel)(1:testSize(1), 1:testSize(2), 1:testSize(3));
-tM = imFcn(tM, imr);
-sLobj.preTransformationMatch = sLobj.corrCalc(tT(:), tM(:));
+
+tT(lt(tT(:), sLobj.data1OtsuThreshold)) = NaN;
+tT(ge(tT(:), sLobj.data1OtsuThreshold)) = 1;
+tM(lt(tM(:), sLobj.data2OtsuThreshold)) = NaN;
+tM(ge(tM(:), sLobj.data2OtsuThreshold)) = 1;
+[sLobj.preTransformationMatch, ~] = corr(single(tT(:)), single(tM(:)), 'Type', 'Pearson', 'Rows', 'complete');
+
 clear tT tM
 
 % Check if actual data 'quality'! Save time point 1 data!
 tifFiles = tmpDirChecker(sLobj);
-% Load 3D data! Always try to load deconvolved data! (or at least what was name 'deconv' in synLoc 'load2ChannelTif_Fcn' function)!
+% Load 3D data! Always try to load deconvolved data! (or at least what was named 'deconv' in synLoc 'load2ChannelTif_Fcn' function)!
 % Set output name!
-if ischar(tifFiles(1).prepro)
-    saveTiffName_in = tifFiles(1).prepro;
-    saveTiffName_ext = '_prepro.tif';
-    transformSuffix = '_prepro_transformed.tif';
+if ischar(tifFiles(1).proc)
+    saveTiffName_in = tifFiles(1).proc;
+    saveTiffName_ext = '_proc.tif';
+    transformSuffix = '_proc_transformed.tif';
 elseif ischar(tifFiles(1).mf)
     saveTiffName_in = tifFiles(1).mf;
     saveTiffName_ext = '_mf.tif';
@@ -101,7 +104,7 @@ im2transform = {'G1', 'R1'};
 doTransform(sLobj, transformParametersFile_modified, im2transform, transformSuffix)
 
 % Consider 'transformRawData' and save 'raw', 'median filtered' input!
-if sLobj.transformRawData && ~sLobj.loadTransformed
+if sLobj.transformRawData && ~sLobj.loadRegisteredImages
     % Reload tifs, save, and transform!
     % Load 3D data at 'raw' and 'mf' quality!
     if ischar(tifFiles(1).mf) && ischar(tifFiles(2).mf)
@@ -166,14 +169,17 @@ recycle('off')
 delete(transformParametersFile_modified, fullfile(sLobj.dataOutputPath, sLobj.elastixDataDir, '*.mhd'), fullfile(sLobj.dataOutputPath, sLobj.elastixDataDir, '*.raw'));
 recycle(recycleStatus)
 
+
 % Estimate correlation between image stacks (post)!
 target_channel = [sLobj.leadingChannel, '0'];
 moved_channel = [sLobj.leadingChannel, '1'];
 tT = sLobj.data.(target_channel)(1:testSize(1), 1:testSize(2), 1:testSize(3));
-tT = imFcn(tT, imr);
 tM = sLobj.data.(moved_channel)(1:testSize(1), 1:testSize(2), 1:testSize(3));
-tM = imFcn(tM, imr);
-sLobj.postTransformationMatch = sLobj.corrCalc(tT(:), tM(:));
+tT(lt(tT(:), sLobj.data1OtsuThreshold)) = NaN;
+tT(ge(tT(:), sLobj.data1OtsuThreshold)) = 1;
+tM(lt(tM(:), sLobj.data2OtsuThreshold)) = NaN;
+tM(ge(tM(:), sLobj.data2OtsuThreshold)) = 1;
+[sLobj.postTransformationMatch, ~] = corr(single(tT(:)), single(tM(:)), 'Type', 'Pearson', 'Rows', 'complete');
 clear testSize tT tM 
 
 set(sLobj.sLFigH.findobj('Tag', 'preTransformationMatch_edit'), 'String', sprintf('%.1f%%', sLobj.preTransformationMatch * 100))
@@ -290,13 +296,5 @@ for idx = 1:numel(im2transform)
         [status, result] = system(CMD);
     end
 end
-
-return
-
-function stack = imFcn(stack, imr)
-
-iml = imr * double(max(stack(:)));
-stack(lt(stack, iml(1)) | ge(stack, iml(2))) = 0;
-stack = max(stack, [], 3);
 
 return
