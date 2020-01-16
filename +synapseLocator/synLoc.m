@@ -32,10 +32,6 @@ classdef synLoc < handle & synapseLocator.EventData
         wekaModelsFolder = [];
         
         % Data
-%         spotModel_model = []; % Actual model model
-%         spotModel_data = []; % Actual model data
-%         signalModel_G0_model = []; % Signal shape modelled to match G0
-%         signalModel_generic_data = []; % Actual model data
         data = struct('G0', [], 'R0', [], 'G1', [], 'R1', [], ...
             'spotModel_model', [], 'spotModel_data', [], ...
             'signalModel_G0', [], 'signalModel_G0_model', [], ...
@@ -50,7 +46,7 @@ classdef synLoc < handle & synapseLocator.EventData
     % Input processing
     properties (GetAccess=public, SetAccess=public, SetObservable=true)
         leadingChannel = [];
-        loadTransformed = [];
+        loadRegisteredImages = [];
         initialTransform = [];        
         medianFilter = [];
         medianFilterParams = [];
@@ -75,31 +71,33 @@ classdef synLoc < handle & synapseLocator.EventData
         
     % Output processing
     properties (GetAccess=public, SetAccess=public, SetObservable=true)
-        dRGx = []; % Use either G0 or (G0 + G1)
-        dRGxThreshold = []; % Threshold for reporting signals
-        G0matchThreshold = []; % Threshold for reporting signals
+        dRG0Threshold = []; % Threshold for reporting labels
+        excludeSpotsAtEdges = []; % Exclude spots centered at image stack boundary
         
         summaryFields = [];
         summaryTemplate = [];
         summaryTableFields = [];
         summaryTableTemplate = [];
         synapseLocatorSummary = [];
+        synapseLocatorSummary_mf = [];
+        synapseLocatorSummary_raw = [];
         transformRawData = [];
         resultSaved = 0;
         compositeTif = [];
     end
-        
+            
     % elastix
     properties (GetAccess=public, SetAccess=public, SetObservable=true)
+        data1OtsuThreshold = [];
+        data2OtsuThreshold = [];
         data1Threshold = [];
         data2Threshold = [];
-        g1g0_thresholdRatio = [];
         initialTransformParams = [];
 
         register_CMD = [];
         transformation_CMD = [];
         apparentSimilarity = [];
-        labelDensity = [];
+        markerDensity = [];
     end
     
     % ImageJ
@@ -128,7 +126,6 @@ classdef synLoc < handle & synapseLocator.EventData
     % Synapse Locator parameters
     properties (GetAccess=public, SetAccess=public, SetObservable=true)
         genericSpotModel = []; % Just the name
-        genericSignalModel = []; % Just the name        
         
         g0_threshold = [];
         g1_threshold = [];
@@ -184,8 +181,6 @@ classdef synLoc < handle & synapseLocator.EventData
         modelQuality_listener
         featureStats_listener
         
-        summaryPlots_listener
-        
         saveResults_listener
     end
     
@@ -198,17 +193,14 @@ classdef synLoc < handle & synapseLocator.EventData
         deleteROI
         clearROIs
         
+        trainClassifier
         loadModel
         saveModel
         clearModel
         modelQuality
         featureStats
-        
-        summaryPlots
 
         saveResults
-
-        trainClassifier
     end
     
     % Object definitions
@@ -229,8 +221,6 @@ classdef synLoc < handle & synapseLocator.EventData
             obj.modelQuality_listener = addlistener(obj, 'modelQuality', @(src, evnt) modelQuality_Fcn(src, evnt));
             obj.featureStats_listener = addlistener(obj, 'featureStats', @(src, evnt) featureStats_Fcn(src, evnt));
             
-            obj.summaryPlots_listener = addlistener(obj, 'summaryPlots', @(src, evnt) summaryPlots_Fcn(src, evnt));
-            
             obj.saveResults_listener = addlistener(obj, 'saveResults', @(src, evnt) saveResults_Fcn(src, evnt));
         end
     end
@@ -250,8 +240,6 @@ classdef synLoc < handle & synapseLocator.EventData
                 preprocessParamsChecker_Fcn(obj)
                 % Clear already calculated features!
                 obj.featureNames_signalChannel = [];
-                %                 obj.featureNames = [];
-                %                 obj.featureDataDir = [];
                 % Start preprocess macro!
                 [imagejSettings, ijRunMode] = obj.imageJChecker();
                 ijArgs = strjoin({...
@@ -265,6 +253,16 @@ classdef synLoc < handle & synapseLocator.EventData
                 CMD = sprintf('"%s" %s "%s" "%s"', obj.IJ_exe, imagejSettings, fullfile(obj.synapseLocatorFolder, obj.IJMacrosFolder, obj.preprocessMacro), ijArgs);
                 [status, result] = system(CMD); %#ok<ASGLU>
             else
+                set(findobj(obj.sLFigH, 'Tag', 'data1Threshold_edit'), 'String', '')
+                set(findobj(obj.sLFigH, 'Tag', 'data1ThresholdSuggestion_edit'), 'String', '')
+                set(findobj(obj.sLFigH, 'Tag', 'data2Threshold_edit'), 'String', '')
+                set(findobj(obj.sLFigH, 'Tag', 'data2ThresholdSuggestion_edit'), 'String', '')
+                set(findobj(obj.sLFigH, 'Tag', 'g0_threshold_edit'), 'String', '')
+                set(findobj(obj.sLFigH, 'Tag', 'g0_thresholdSuggestion_edit'), 'String', '')
+                set(findobj(obj.sLFigH, 'Tag', 'g1_threshold_edit'), 'String', '')
+                set(findobj(obj.sLFigH, 'Tag', 'g1_thresholdSuggestion_edit'), 'String', '')
+                drawnow
+
                 for idx = 1:2
                     status = getFileName(obj, idx);
                     if ~status
@@ -290,8 +288,8 @@ classdef synLoc < handle & synapseLocator.EventData
                 % transformed images (no further input processing), and
                 % user supplied processed images (must have '*_deconv.tif' filename)!
 
-                % Check if data were already transformed!
-                if obj.loadTransformed
+                % Check if data were already registered!
+                if obj.loadRegisteredImages
                     % Great, take files as is! No preprocessing!
                 else
                     if ~obj.filterImages
@@ -308,7 +306,7 @@ classdef synLoc < handle & synapseLocator.EventData
                                     fullfile(obj.dataOutputPath, obj.tmpImagesDir, [name_, '_raw.tif'])); %#ok<ASGLU>
                                 [status, msg, msgID] = copyfile(...
                                     regexprep(obj.(['dataFile_', whichOne]), '.tif$', '_deconv.tif'), ...
-                                    fullfile(obj.dataOutputPath, obj.tmpImagesDir, [name_, '_prepro.tif'])); %#ok<ASGLU>
+                                    fullfile(obj.dataOutputPath, obj.tmpImagesDir, [name_, '_proc.tif'])); %#ok<ASGLU>
                             end
                         else
                             % Ok, skip all preprocessing and copy raw files to tmpImages directory!
@@ -368,12 +366,16 @@ classdef synLoc < handle & synapseLocator.EventData
             % Check for intial transformation and get values!
             initialTransform_Fcn(obj)
             
-            % Suggest threshold for registration step! Suggest threshold for spot finding step!
-            tT_ = quantile(obj.data.G0(:), [0.7, 0.71]);
-            tmpThresh1 = round([median(obj.data.G0(obj.data.G0 > tT_(1))), median(obj.data.G0(obj.data.G0 > tT_(2)))]);
-            tT_ = quantile(obj.data.G1(:), [0.7, 0.71]);
-            tmpThresh2 = round([median(obj.data.G1(obj.data.G1 > tT_(1))), median(obj.data.G1(obj.data.G1 > tT_(2)))]);
-
+            % Suggest thresholds for registration and spot finding!
+            max1 = double(max(obj.data.G0(:)));
+            [N, ~] = histcounts(obj.data.G0, max1);
+            obj.data1OtsuThreshold = otsuthresh(N) * max1;
+            tmpThresh1 = round([0.1, 0.25] .* obj.data1OtsuThreshold);
+            max2 = double(max(obj.data.G1(:)));
+            [N, ~] = histcounts(obj.data.G1, max2);
+            obj.data2OtsuThreshold = otsuthresh(N) * max2;
+            tmpThresh2 = round([0.1, 0.25] .* obj.data2OtsuThreshold);
+            
             % Suggest threshold for registration step!
             obj.data1Threshold = tmpThresh1(1);
             set(findobj(obj.sLFigH, 'Tag', 'data1Threshold_edit'), 'String', sprintf('%i', tmpThresh1(1)))
@@ -381,11 +383,12 @@ classdef synLoc < handle & synapseLocator.EventData
             obj.data2Threshold = tmpThresh2(1);
             set(findobj(obj.sLFigH, 'Tag', 'data2Threshold_edit'), 'String', sprintf('%i', tmpThresh2(1)))
             set(findobj(obj.sLFigH, 'Tag', 'data2ThresholdSuggestion_edit'), 'String', sprintf('%i', tmpThresh2(1)))
+            
             % Suggest threshold for spot finding step!
             obj.g0_threshold = tmpThresh1(2);
             set(findobj(obj.sLFigH, 'Tag', 'g0_threshold_edit'), 'String', sprintf('%i', tmpThresh1(2)))
             set(findobj(obj.sLFigH, 'Tag', 'g0_thresholdSuggestion_edit'), 'String', sprintf('%i', tmpThresh1(2)))
-            obj.g1_threshold = round(tmpThresh2(2) * obj.g1g0_thresholdRatio);
+            obj.g1_threshold = round(tmpThresh2(2) * 0.1);
             set(findobj(obj.sLFigH, 'Tag', 'g1_threshold_edit'), 'String', sprintf('%i', min([tmpThresh1(2), obj.g1_threshold])))
             set(findobj(obj.sLFigH, 'Tag', 'g1_thresholdSuggestion_edit'), 'String', sprintf('%i', min([tmpThresh1(2), obj.g1_threshold])))
                         
@@ -409,8 +412,8 @@ classdef synLoc < handle & synapseLocator.EventData
             
             set(findobj(obj.sLFigH, 'Tag', 'parameter_togglebutton'), 'BackgroundColor', [1.0, 0.95, 0.95]);
 
-            % Check if data are already transformed!
-            if obj.loadTransformed || any(contains({'locator'}, evnt.someData))
+            % Check if data are already registered!
+            if obj.loadRegisteredImages || any(contains({'locator'}, evnt.someData))
                 % Start segmentation!
                 if any([~isempty(obj.internalStuff.locatorParamsChanged); isempty(obj.synapseLocatorSummary.Spot_ID)])
                     segmentationController_Fcn(obj)
@@ -640,9 +643,9 @@ classdef synLoc < handle & synapseLocator.EventData
             % Prepare to use the 'best' filtered input data!
             tifFiles = tmpDirChecker(obj);
             % Load 3D data! Always try to load deconvolved data! (or at least what was name 'deconv' in synLoc 'load2ChannelTif_Fcn' function)!
-            if ischar(tifFiles(1).prepro)
-                % Load 'prepro' type data!
-                fileName = tifFiles(1).prepro;
+            if ischar(tifFiles(1).proc)
+                % Load 'proc' type data!
+                fileName = tifFiles(1).proc;
             elseif ischar(tifFiles(1).mf)
                 % Load 'mf' type data!
                 fileName = tifFiles(1).mf;
@@ -700,8 +703,8 @@ classdef synLoc < handle & synapseLocator.EventData
             newMax = num2str(2^8);
             
             tifFiles = tmpDirChecker(obj);
-            if obj.loadTransformed
-                dataFile_2_ = fullfile(obj.dataOutputPath, obj.tmpImagesDir, tifFiles(2).prepro);
+            if obj.loadRegisteredImages
+                dataFile_2_ = fullfile(obj.dataOutputPath, obj.tmpImagesDir, tifFiles(2).proc);
                 % Check for upsampling!
                 if obj.upsampling
                     dataFile_2_ = regexprep(dataFile_2_, '.tif$', '_scaled.tif');
@@ -710,8 +713,8 @@ classdef synLoc < handle & synapseLocator.EventData
             else
                 % Prepare to use the 'best' filtered input data!
                 % Load 3D data! Always try to load deconvolved data! (or at least what was name 'deconv' in synLoc 'load2ChannelTif_Fcn' function)!
-                if ischar(tifFiles(2).prepro)
-                    fileName = 'R1_prepro_transformed.tif';
+                if ischar(tifFiles(2).proc)
+                    fileName = 'R1_proc_transformed.tif';
                 elseif ischar(tifFiles(1).mf)
                     fileName = 'R1_mf_transformed.tif';
                 else
@@ -850,21 +853,6 @@ classdef synLoc < handle & synapseLocator.EventData
                 figure('Name', 'Model Feature Overview', 'NumberTitle', 'off', 'Position', [100 200 1400 500], 'Units', 'pixels')
                 boxplot(features_, grps, 'PlotStyle', 'compact', 'ColorGroup', repmat([0,1], 1, (size(data_, 2) - 1)), 'FactorSeparator', 1);
                 title('Model Features'); ylabel('Feature Values (zscore)'); grid on; grid minor;
-                
-                
-%                 [stats0, stats1, stats2, stats3, stats4] = grpstats(features_, predicted_, {'gname', 'mean', 'median', 'std', 'mad'}); %#ok<ASGLU>
-%                 fprintf('Mean\n'); disp(stats1)
-%                 fprintf('Median\n'); disp(stats2)
-%                 fprintf('Standard deviation\n'); disp(stats3)
-%                 fprintf('Median absolute deviation\n'); disp(stats4)
-%                 fprintf('Standard Error\n'); disp(stats2/sqrt(numel(predicted_)))
-                
-%                 figure
-%                 grpstats(features_, predicted_, 0.05)
-%                 title('Feature Stats (Spine model training set)')
-                
-%                 figure
-%                 gplotmatrix(features_, features_, predicted_, 'mk', '.o', [30,3], 'on', 'hist')
             end
         end
                 
@@ -893,11 +881,13 @@ classdef synLoc < handle & synapseLocator.EventData
             % Show progress in GUI!
             obj.statusTextH.String = 'Finding Spots...(step 1)';
             drawnow
-            % Reset number of spines in GUI!
+            % Reset number of spots in GUI!
             set(findobj(obj.sLFigH, 'Tag', 'spotsN_edit'), 'String', '');
-            set(findobj(obj.sLFigH, 'Tag', 'signalsN_edit'), 'String', '');
+            set(findobj(obj.sLFigH, 'Tag', 'labelsN_edit'), 'String', '');
                         
+            %%%%%%%%%%%%%%%%%%
             spotFinding = 1;
+            %%%%%%%%%%%%%%%%%%
             switch spotFinding
                 case 0
                     % Set up data for classification!
@@ -973,16 +963,17 @@ classdef synLoc < handle & synapseLocator.EventData
                         drawnow
                     end
                     
-                    % Reset signal display!
+                    % Reset label display!
                     tmpH = guihandles(obj.sLFigH);
-                    tmpH.signal_results_uibuttongroup.SelectedObject = tmpH.signal_dRGx_radiobutton;
-                    tmpH.signal_results_uibuttongroup.SelectionChangedFcn(tmpH.signal_results_uibuttongroup, obj.sLFigH)
+                    tmpH.label_results_uibuttongroup.SelectedObject = tmpH.label_default_radiobutton;
+                    tmpH.label_results_uibuttongroup.SelectionChangedFcn(tmpH.label_results_uibuttongroup, obj.sLFigH)
                                         
                 case 1
                     bw = ge(obj.data.G0, obj.g0_threshold) & ge(obj.data.G1, obj.g1_threshold);
                     bwd = bwdist(~bw, 'quasi-euclidean');
                     % bwd = bwdist(~bw, 'euclidean');
                     bwd = -bwd .* obj.rescaler(obj.data.G0, 0, 1023);
+%                     bwd = -bwd;
                     bwd(~bw) = Inf;
                     bww = watershed(bwd, obj.bwconncompValue);
                     clear bwd
@@ -1029,28 +1020,28 @@ classdef synLoc < handle & synapseLocator.EventData
                     obj.data.spot_predictedStack(spotVoxels_idx(hit_idx)) = 1;
                     
                     % Polish predicted positions to get most likely spots!
-                    % Convert true spot min/max to pixel min/max! Restrict min to 2 pixels!
-                    % spotSizeMin_px = max([2,2,2 ; min([2,2,2; round(obj.spotSizeMin ./ obj.vxlSize)])]);
                     if obj.upsampling
-%                         spotSizeMin_px = max([2, 2, 1.5 ; min([2, 2, 1.5; round([1, 1, 2] .* obj.spotSizeMin ./ obj.vxlSize)])]);
-                        spotSizeMin_px = max([2, 2, 2 ; round([1, 1, 2] .* obj.spotSizeMin ./ obj.vxlSize)]);
-                        spotSizeMax_px = round([1, 1, 2] .* obj.spotSizeMax(1) ./ obj.vxlSize);
+                        spotSizeMin_px = round([1, 1, 2] .* obj.spotSizeMin);
+                        spotSizeMax_px = round([1, 1, 2] .* obj.spotSizeMax);
                     else
-%                         spotSizeMin_px = max([2, 2, 1.5 ; min([2, 2, 1.5; round(obj.spotSizeMin ./ obj.vxlSize)])]);
-                        spotSizeMin_px = max([2, 2, 2 ; round(obj.spotSizeMin ./ obj.vxlSize)]);
-                        spotSizeMax_px = round(obj.spotSizeMax(1) ./ obj.vxlSize);
+                        spotSizeMin_px = obj.spotSizeMin;
+                        spotSizeMax_px = obj.spotSizeMax;
                     end
                     
+                    % Calculate results!
                     results = spotAnalyzer2(obj.data.spot_classProbsStack, CC, obj.spotSpecificity, spotSizeMin_px, spotSizeMax_px);
                     
-                    % Convert back to true spot min/max to pixel min/max! Restrict min to 2 pixels!
+                    % Convert back in case of upsampling!
                     if obj.upsampling
-                        spotSize_ = arrayfun(@(x) (results(x).spot_diameters_ellipsoid .* obj.vxlSize) ./ [1, 1, 2], 1:numel(results), 'Uni', 0);
+                        spotSize_ = arrayfun(@(x) results(x).spot_diameters_ellipsoid ./ [1, 1, 2], 1:numel(results), 'Uni', 0);
+                        bb_ = arrayfun(@(x) results(x).BoundingBox ./ [1, 1, 2], 1:numel(results), 'Uni', 0);
                     else
-                        spotSize_ = arrayfun(@(x) results(x).spot_diameters_ellipsoid .* obj.vxlSize, 1:numel(results), 'Uni', 0);
+                        spotSize_ = arrayfun(@(x) results(x).spot_diameters_ellipsoid, 1:numel(results), 'Uni', 0);
+                        bb_ = arrayfun(@(x) results(x).BoundingBox, 1:numel(results), 'Uni', 0);
                     end
                     for sS_idx = 1:numel(results)
                         results(sS_idx).spot_diameters_ellipsoid = spotSize_{sS_idx};
+                        results(sS_idx).bb = bb_{sS_idx};
                     end
                     
                     % Gather spot data for output, if no results set to template!
@@ -1062,7 +1053,7 @@ classdef synLoc < handle & synapseLocator.EventData
                         obj.statusTextH.String = '';
                         drawnow
                     else
-                        spotSummary_Fcn(obj, results);
+                        obj.spotSummary_Fcn(results);
                         clear('results')
                         % Blow up for display!
                         % Show number of spots in GUI!
@@ -1077,10 +1068,10 @@ classdef synLoc < handle & synapseLocator.EventData
                         drawnow
                     end
                     
-                    % Reset signal display!
+                    % Reset label display!
                     tmpH = guihandles(obj.sLFigH);
-                    tmpH.signal_results_uibuttongroup.SelectedObject = tmpH.signal_dRGx_radiobutton;
-                    tmpH.signal_results_uibuttongroup.SelectionChangedFcn(tmpH.signal_results_uibuttongroup, obj.sLFigH)
+                    tmpH.label_results_uibuttongroup.SelectedObject = tmpH.label_default_radiobutton;
+                    tmpH.label_results_uibuttongroup.SelectionChangedFcn(tmpH.label_results_uibuttongroup, obj.sLFigH)
 
                 case 2
                     spotVoxels_idx = find(ge(obj.data.G0, obj.g0_threshold) & ge(obj.data.G1, obj.g1_threshold));
@@ -1171,18 +1162,17 @@ classdef synLoc < handle & synapseLocator.EventData
                         drawnow
                     end
                     
-                    % Reset signal display!
+                    % Reset label display!
                     tmpH = guihandles(obj.sLFigH);
-                    tmpH.signal_results_uibuttongroup.SelectedObject = tmpH.signal_dRGx_radiobutton;
-                    tmpH.signal_results_uibuttongroup.SelectionChangedFcn(tmpH.signal_results_uibuttongroup, obj.sLFigH)
-                case 3
+                    tmpH.label_results_uibuttongroup.SelectedObject = tmpH.label_default_radiobutton;
+                    tmpH.label_results_uibuttongroup.SelectionChangedFcn(tmpH.label_results_uibuttongroup, obj.sLFigH)
             end            
         end
                 
         function findSignals_Fcn(obj, ~)
             % Check spots for their 'signal' quality (r1/r0 ratio & so)!
             % Show progress in GUI!
-            obj.statusTextH.String = 'Finding Signals...';
+            obj.statusTextH.String = 'Assigning Labels...';
             drawnow
             
             % Check for spots!
@@ -1198,7 +1188,7 @@ classdef synLoc < handle & synapseLocator.EventData
             % Get some features from r1 data (=signal channel)! Do so for every start (spot detection may have changed)!
             if isempty(obj.featureNames_signalChannel)
                 % Show progress in GUI!
-                obj.statusTextH.String = 'Calculating Signal Features ...';
+                obj.statusTextH.String = 'Calculating Spot (2nd channel) Features ...';
                 drawnow
                 getFeatures_signalChannel_Fcn(obj)
                 obj.statusTextH.String = '';
@@ -1209,7 +1199,7 @@ classdef synLoc < handle & synapseLocator.EventData
             spotVoxelIDs = sub2ind(size(obj.data.G0), obj.synapseLocatorSummary.row, obj.synapseLocatorSummary.column, obj.synapseLocatorSummary.section);
             
             if isempty(spotVoxelIDs)
-                obj.statusTextH.String = 'No potential Signals';
+                obj.statusTextH.String = 'No Spots got ''Active'' Label';
                 drawnow
                 pause(1)
                 obj.statusTextH.String = '';
@@ -1218,11 +1208,9 @@ classdef synLoc < handle & synapseLocator.EventData
             end
             
             % Reset number of signals in GUI!
-            set(findobj(obj.sLFigH, 'Tag', 'signalsN_edit'), 'String', '');
-            % fprintf('%s: %i\n', 'Number of spots to test', numel(obj.synapseLocatorSummary.Spot_ID))
+            set(findobj(obj.sLFigH, 'Tag', 'labelsN_edit'), 'String', '');
 
             % Set up data for classification!
-
             % Gather signal feature from qualified voxels and submit to signal model!
             features2test = zeros(numel(spotVoxelIDs), numel(obj.featureNames_signalChannel));
             for featureNameIdx = 1:numel(obj.featureNames_signalChannel)
@@ -1236,11 +1224,11 @@ classdef synLoc < handle & synapseLocator.EventData
             features2test = matlab2weka(relation, attributes, features2test, labels);
             
             % Use signal model from g0 (=leading channel) as template for signal 'shape' in r1 to filter qualified spots!
-            obj.statusTextH.String = 'Building Model for Signal Detection...';
+            obj.statusTextH.String = 'Building Model for Label Assignment...';
             drawnow
             
             % Make signal model from real data (use g0 as template for signal 'shape')!
-            % Get matching attributes from spine train data set!
+            % Get matching attributes from spot train data set!
             ft_idx = cellfun(@(x) find(strcmp(obj.featureNames, strrep(x, '_SignalChannel', ''))), obj.featureNames_signalChannel, 'Uni', 0);
             ft_idx = cat(1, ft_idx{:})';
             
@@ -1286,67 +1274,78 @@ classdef synLoc < handle & synapseLocator.EventData
             % obj.data.signalModel_G0;
             % Classify data (input data)
             % [signal_predicted_, signal_classProbs_, confusionMatrix] = wekaClassify(signalTrainData_, obj.signalModel_G0); %#ok<ASGLU>
-            [signal_predicted_, signal_classProbs_, ~] = wekaClassify(features2test, obj.data.signalModel_G0_model);
+            [signal_predicted_, signal_classProbs_, ~] = wekaClassify(features2test, obj.data.signalModel_G0_model); %#ok<ASGLU>
             % tabulate(signal_predicted_);
             % confusionMatrix %#ok<NOPRT>
                      
             % Update spot summary!
-            obj.synapseLocatorSummary.G0matched = gt(signal_classProbs_(:,1), obj.signalSpecificity);
-            obj.synapseLocatorSummary.G0matched_probs = signal_classProbs_(:,1);
-            
-            % Use extra signal model from a simulated stack as template for signal 'shape' in r1 to filter qualified spots!
-            % Model is loaded on startup (and eventually updated)!
-            [signal_predicted_, signal_classProbs_, ~] = wekaClassify(features2test, obj.data.signalModel_generic_model);
-            % tabulate(signal_predicted_);
-            
-            % Update spot summary!
-            obj.synapseLocatorSummary.Genericmatched = gt(signal_classProbs_(:,1), obj.signalSpecificity);
-            obj.synapseLocatorSummary.Genericmatched_probs = signal_classProbs_(:,1);
-
+            obj.synapseLocatorSummary.spotMatch = gt(signal_classProbs_(:,1), obj.signalSpecificity);
+            obj.synapseLocatorSummary.spotMatch_probs = signal_classProbs_(:,1);
+            % Add values also to 'raw' and 'mf' type data if available!
+            tifFiles = tmpDirChecker(obj);
+            if obj.transformRawData && ~obj.loadRegisteredImages
+                if ischar(tifFiles(1).mf)
+                    obj.synapseLocatorSummary_mf.spotMatch = gt(signal_classProbs_(:,1), obj.signalSpecificity);
+                    obj.synapseLocatorSummary_mf.spotMatch_probs = signal_classProbs_(:,1);
+                end
+                if ischar(tifFiles(1).raw)
+                    obj.synapseLocatorSummary_raw.spotMatch = gt(signal_classProbs_(:,1), obj.signalSpecificity);
+                    obj.synapseLocatorSummary_raw.spotMatch_probs = signal_classProbs_(:,1);
+                end
+            end
+                        
             % Show found signals in table
             obj.synapseLocatorSummaryTableH = synapseLocatorSummaryTable(obj);
             
             % Reset signal display!
             tmpH = guihandles(obj.sLFigH);
-            tmpH.signal_results_uibuttongroup.SelectedObject = tmpH.signal_dRGx_radiobutton;
-            tmpH.signal_results_uibuttongroup.SelectionChangedFcn(tmpH.signal_results_uibuttongroup, obj.sLFigH)
+            tmpH.label_results_uibuttongroup.SelectedObject = tmpH.label_default_radiobutton;
+            tmpH.label_results_uibuttongroup.SelectionChangedFcn(tmpH.label_results_uibuttongroup, obj.sLFigH)
 
             % Reset summary table to show 'All'!
             tmpH = guihandles(obj.synapseLocatorSummaryTableH);
-            tmpH.uibuttongroup1.SelectedObject = tmpH.all_radiobutton;
-            tmpH.uibuttongroup1.SelectionChangedFcn(tmpH.uibuttongroup1, 'All')
+            tmpH.dataShowMode_uibuttongroup.SelectedObject = tmpH.dataShowMode_all_radiobutton;
+            tmp_.NewValue.String = 'All';
+            tmpH.dataShowMode_uibuttongroup.SelectionChangedFcn(tmpH.dataShowMode_uibuttongroup, tmp_)
+            tmpH.dataProcessType_uibuttongroup.SelectedObject = tmpH.dataProcessType_processed_radiobutton;
+            tmp_.NewValue.String = 'processed';
+            tmpH.dataProcessType_uibuttongroup.SelectionChangedFcn(tmpH.dataProcessType_uibuttongroup, tmp_)
+            tmpH.dataSortBy_uibuttongroup.SelectedObject = tmpH.dataSortBy_dRG0_radiobutton;
+            tmp_.NewValue.String = 'dR/G0';
+            tmpH.dataSortBy_uibuttongroup.SelectionChangedFcn(tmpH.dataSortBy_uibuttongroup, tmp_)
             
             % Reset number of signals field in GUI!
-            switch obj.dRGx
-                case 'dR/G0'
-                    dRGx_N = sum(gt(obj.synapseLocatorSummary.rDelta_g0, obj.dRGxThreshold));
-                case 'dR/Gsum'
-                    dRGx_N = sum(gt(obj.synapseLocatorSummary.rDelta_gSum, obj.dRGxThreshold));
-            end
-            G0matched_N = sum(obj.synapseLocatorSummary.G0matched);
-            genericmatched_N = sum(obj.synapseLocatorSummary.Genericmatched);            
-            
-            set(findobj(obj.sLFigH, 'Tag', 'signalsN_edit'), 'String', sprintf('%i / %i / %i', dRGx_N, G0matched_N, genericmatched_N));
-            
-            % Plot result overview!
-            summaryPlots(obj.synapseLocatorSummary, obj.dRGx, obj.dRGxThreshold)
+            labelsN = sum(ge(obj.synapseLocatorSummary.rDelta_g0, obj.dRG0Threshold));
+            set(findobj(obj.sLFigH, 'Tag', 'labelsN_edit'), 'String', sprintf('%i', labelsN));
             
             obj.statusTextH.String = '';
             drawnow
         end
         
         function saveResults_Fcn(obj, ~)
-            % Get path to save results (params, elastix params, tifs, spines, signals, ...)!
+            % Get path to save results (params, elastix params, tifs, spots, signals, ...)!
             % Move important stuff to results dir. Delete tmp files!
             % Save spots and (if available) all qualified signals!
             
+            % Check if data were already processed by SynapseLocator or
+            % just loaded and preprocessed by ImageJ
+            if ~exist(fullfile(obj.dataOutputPath, 'G0_raw.tif'), 'file')
+                w = warndlg('Only processed data available! See "tmpImages" directory!');
+                pause(1)
+                delete(w)
+            end
+            
             obj.statusTextH.String = 'Saving results...';
             drawnow
-
-            saveastiff_options.color = false; saveastiff_options.big = false; saveastiff_options.overwrite = true;
             
+            % saveastiff_options.color = false; saveastiff_options.big = false; saveastiff_options.overwrite = true;
+            saveastiff_options.color = false; saveastiff_options.big = true; saveastiff_options.overwrite = true;
+            
+            % Prepare to use the 'best' filtered input data!
+            tifFiles = tmpDirChecker(obj);
+
             % Check if a new round of spot/signal finding on already transformed data was run!
-            switch get(findobj(obj.sLFigH, 'Tag', 'loadTransformed_radiobutton'), 'Value')
+            switch get(findobj(obj.sLFigH, 'Tag', 'loadRegisteredImages_radiobutton'), 'Value')
                 case 0
                     % 'Standard' case, input data went through all steps.
                     % Keep important elastix params! Keep params (but delete most files)!
@@ -1363,8 +1362,7 @@ classdef synLoc < handle & synapseLocator.EventData
                     recycleStatus = recycle;
                     recycle('off')
                     cellfun(@(x) delete(fullfile(obj.dataOutputPath, obj.elastixDataDir, x)), files2delete)
-                    recycle(recycleStatus)
-                    
+                    recycle(recycleStatus)                    
                 case 1
                     % 'Non-Standard' case, already aligned images were re-analyzed.                    
             end
@@ -1372,9 +1370,9 @@ classdef synLoc < handle & synapseLocator.EventData
             % Save detected spots as tif!
             se = strel('sphere', 3);
             if obj.upsampling
-                stack_ = zeros(size(obj.data.G0) ./ [1, 1, 2], 'uint16');
+                stack_ = zeros(size(obj.data.G0) ./ [1, 1, 2]);
             else
-                stack_ = zeros(size(obj.data.G0), 'uint16');
+                stack_ = zeros(size(obj.data.G0));
             end
             if isempty(obj.synapseLocatorSummary.Spot_ID)
                 saveastiff(stack_, fullfile(obj.dataOutputPath, 'SpotSummary.tif'), saveastiff_options);
@@ -1388,30 +1386,30 @@ classdef synLoc < handle & synapseLocator.EventData
                 stack_ = imdilate(stack_, se);
                 saveastiff(stack_, fullfile(obj.dataOutputPath, 'SpotSummary.tif'), saveastiff_options);
             end
+            clear stack_
             
-            % Save predicted signals as tif!
-            if all([...
-                    ischar([obj.synapseLocatorSummary.G0matched]), ...
-                    ischar([obj.synapseLocatorSummary.Genericmatched])])
-                % There are no signals! Save stack of zeros as signal summary tif!
+            % Save assigned labels as tif!
+            if all(ischar([obj.synapseLocatorSummary.spotMatch]))
+                % No labels were assigned! Save stack of zeros as signal summary tif!
                 if obj.upsampling
-                    stack_ = zeros(size(obj.data.G0) ./ [1, 1, 2], 'unit16');
+                    stack_ = zeros(size(obj.data.G0) ./ [1, 1, 2]);
                 else
-                    stack_ = zeros(size(obj.data.G0), 'uint16');
+                    stack_ = zeros(size(obj.data.G0));
                 end
                 saveastiff(stack_, fullfile(obj.dataOutputPath, 'SignalSummary.tif'), saveastiff_options);
+                clear stack_
             else
-                % There are signals! Save values!
-                obj.synapseLocatorSummarySignalTifSaver(saveastiff_options)
+                % There are spots and labels! Save values!
+                obj.synapseLocatorSummaryLabelTifSaver(saveastiff_options)
             end
             
             if ~isempty(obj.synapseLocatorSummary.Spot_ID)
                 synapseLocatorSummarySaver(obj)
             end
             
-            % Make composite! Complement transformed data(G0/R0/G1/R1) with spot and signal positions!
-            % Check if a new round of spot/signal finding on already transformed data was run!
-            switch obj.loadTransformed
+            % Make composite! Complement transformed data(G0/R0/G1/R1) with spot and label information!
+            % Check if a new round of spot/label finding on already transformed data was run!
+            switch obj.loadRegisteredImages
                 case 1
                     % Skip making composite tif!
                 case 0
@@ -1419,14 +1417,12 @@ classdef synLoc < handle & synapseLocator.EventData
                         [imagejSettings, ijRunMode] = obj.imageJChecker();
                         dataPath_ = obj.dataOutputPath;
                         dataFile_spotSummary_ = 'SpotSummary.tif';
-                        dataFile_signalSummary_ = 'SignalSummary.tif';
+                        dataFile_labelSummary_ = 'LabelSummary.tif';
                         % Make 'good' output tifs! Check available data!
-                        % Prepare to use the 'best' filtered input data!
-                        tifFiles = tmpDirChecker(obj);
                         % Load 3D data! Always try to load deconvolved data! (or at least what was name 'deconv' in synLoc 'load2ChannelTif_Fcn' function)!
-                        if ischar(tifFiles(1).prepro)
+                        if ischar(tifFiles(1).proc)
                             % Load 'deconv' type data!
-                            dataFile_g0_ = 'G0_prepro.tif'; dataFile_r0_ = 'R0_prepro.tif'; dataFile_g1_ = 'G1_prepro_transformed.tif'; dataFile_r1_ = 'R1_prepro_transformed.tif';
+                            dataFile_g0_ = 'G0_proc.tif'; dataFile_r0_ = 'R0_proc.tif'; dataFile_g1_ = 'G1_proc_transformed.tif'; dataFile_r1_ = 'R1_proc_transformed.tif';
                         elseif ischar(tifFiles(1).mf)
                             % Load 'mf' type data!
                             dataFile_g0_ = 'G0_mf.tif'; dataFile_r0_ = 'R0_mf.tif'; dataFile_g1_ = 'G1_mf_transformed.tif'; dataFile_r1_ = 'R1_mf_transformed.tif';
@@ -1435,61 +1431,28 @@ classdef synLoc < handle & synapseLocator.EventData
                             dataFile_g0_ = 'G0_raw.tif'; dataFile_r0_ = 'R0_raw.tif'; dataFile_g1_ = 'G1_raw_transformed.tif'; dataFile_r1_ = 'R1_raw_transformed.tif';
                         end
                         
-                        dataOut_ = 'Composite_prepro.tif';
-                        ijArgs = strjoin({dataPath_, dataOut_, dataFile_g0_, dataFile_r0_, dataFile_g1_, dataFile_r1_, dataFile_spotSummary_, dataFile_signalSummary_, ijRunMode},',');
+                        dataOut_ = 'Composite_proc.tif';
+                        ijArgs = strjoin({dataPath_, dataOut_, dataFile_g0_, dataFile_r0_, dataFile_g1_, dataFile_r1_, dataFile_spotSummary_, dataFile_labelSummary_, ijRunMode},',');
                         CMD = sprintf('"%s" %s "%s" "%s"', obj.IJ_exe, imagejSettings, fullfile(obj.synapseLocatorFolder, obj.IJMacrosFolder, obj.gatherOutputMacro), ijArgs);
                         [status, result] = system(CMD); %#ok<ASGLU>
-                        if obj.transformRawData && ~obj.loadTransformed
+                        if obj.transformRawData && ~obj.loadRegisteredImages
                             % Make composite tif from 'raw' and 'mf' data!
                             if ischar(tifFiles(1).mf)
                                 % Load 'mf' type data!
                                 dataFile_g0_ = 'G0_mf.tif'; dataFile_r0_ = 'R0_mf.tif'; dataFile_g1_ = 'G1_mf_transformed.tif'; dataFile_r1_ = 'R1_mf_transformed.tif';
                                 dataOut_ = 'Composite_mf.tif';
-                                ijArgs = strjoin({dataPath_, dataOut_, dataFile_g0_, dataFile_r0_, dataFile_g1_, dataFile_r1_, dataFile_spotSummary_, dataFile_signalSummary_, ijRunMode},',');
+                                ijArgs = strjoin({dataPath_, dataOut_, dataFile_g0_, dataFile_r0_, dataFile_g1_, dataFile_r1_, dataFile_spotSummary_, dataFile_labelSummary_, ijRunMode},',');
                                 CMD = sprintf('"%s" %s "%s" "%s"', obj.IJ_exe, imagejSettings, fullfile(obj.synapseLocatorFolder, obj.IJMacrosFolder, obj.gatherOutputMacro), ijArgs);
                                 [status, result] = system(CMD); %#ok<ASGLU>
                             end
                             % Load raw data!
                             dataFile_g0_ = 'G0_raw.tif'; dataFile_r0_ = 'R0_raw.tif'; dataFile_g1_ = 'G1_raw_transformed.tif'; dataFile_r1_ = 'R1_raw_transformed.tif';
                             dataOut_ = 'Composite_raw.tif';
-                            ijArgs = strjoin({dataPath_, dataOut_, dataFile_g0_, dataFile_r0_, dataFile_g1_, dataFile_r1_, dataFile_spotSummary_, dataFile_signalSummary_, ijRunMode},',');
+                            ijArgs = strjoin({dataPath_, dataOut_, dataFile_g0_, dataFile_r0_, dataFile_g1_, dataFile_r1_, dataFile_spotSummary_, dataFile_labelSummary_, ijRunMode},',');
                             CMD = sprintf('"%s" %s "%s" "%s"', obj.IJ_exe, imagejSettings, fullfile(obj.synapseLocatorFolder, obj.IJMacrosFolder, obj.gatherOutputMacro), ijArgs);
                             [status, result] = system(CMD); %#ok<ASGLU>
                         end
                     end
-            end
-            
-            % Replace some values in summary table to adjust for other quality input!
-            if ~isempty(obj.synapseLocatorSummary.Spot_ID)
-                if obj.transformRawData && ~obj.loadTransformed
-                    % Load median filtered data!
-                    if ischar(tifFiles(1).mf)
-                        % Load 'mf' type data!
-                        dataFile_g0_ = 'G0_mf.tif'; dataFile_r0_ = 'R0_mf.tif'; dataFile_g1_ = 'G1_mf_transformed.tif'; dataFile_r1_ = 'R1_mf_transformed.tif';
-                        summaryDet = deteriorateSummary(obj, dataFile_g0_, dataFile_r0_, dataFile_g1_, dataFile_r1_);
-                        summaryDet = struct2table(summaryDet);
-                        summaryDet = summaryDet(:, obj.summaryFields);
-                        summaryDet.VoxelIDs = cellfun(@(x) sprintf('%i,', x), summaryDet.VoxelIDs, 'Uni', 0);
-                        summaryDet.VoxelIDs2 = cellfun(@(x) sprintf('%i,', x), summaryDet.VoxelIDs2, 'Uni', 0);
-                        % Save synapseLocatorSummary as csv!
-                        writetable(summaryDet, fullfile(obj.dataOutputPath, 'SL_Summary_mf.csv'));
-                        % Save synapseLocatorSummary as mat!
-                        save(fullfile(obj.dataOutputPath, 'SL_Summary_mf.mat'), 'summaryDet');
-                    end
-                    if ischar(tifFiles(1).raw)
-                        % Load raw data!
-                        dataFile_g0_ = 'G0_raw.tif'; dataFile_r0_ = 'R0_raw.tif'; dataFile_g1_ = 'G1_raw_transformed.tif'; dataFile_r1_ = 'R1_raw_transformed.tif';
-                        summaryDet = deteriorateSummary(obj, dataFile_g0_, dataFile_r0_, dataFile_g1_, dataFile_r1_);
-                        summaryDet = struct2table(summaryDet);
-                        summaryDet = summaryDet(:, obj.summaryFields);
-                        summaryDet.VoxelIDs = cellfun(@(x) sprintf('%i,', x), summaryDet.VoxelIDs, 'Uni', 0);
-                        summaryDet.VoxelIDs2 = cellfun(@(x) sprintf('%i,', x), summaryDet.VoxelIDs2, 'Uni', 0);
-                        % Save synapseLocatorSummary as csv!
-                        writetable(summaryDet, fullfile(obj.dataOutputPath, 'SL_Summary_raw.csv'));
-                        % Save synapseLocatorSummary as mat!
-                        save(fullfile(obj.dataOutputPath, 'SL_Summary_raw.mat'), 'summaryDet');
-                    end
-                end
             end
             
             % Save SynapseLocatator params!
@@ -1499,9 +1462,16 @@ classdef synLoc < handle & synapseLocator.EventData
                 'displayChannel'; 'synapseLocatorSummaryTableH';'modelTextH'; ...
                 'Source'; 'EventName'; 'someData'}));
             fields2save = fields2save(~endsWith(fields2save, {'data'; 'internalStuff'}));
+
+            allFields2 = fieldnames(obj.synapseLocatorSummaryTableH.UserData);
+            fields2save2 = allFields2(~endsWith(allFields2, {'sLobj'; 'Data'; 'figure1Position'}));
+            
             SynapseLocatorParams = struct();
             for field2save = fields2save'
                 SynapseLocatorParams.(field2save{:}) = obj.(field2save{:});
+            end
+            for field2save2 = fields2save2'
+                SynapseLocatorParams.(field2save2{:}) = obj.synapseLocatorSummaryTableH.UserData.(field2save2{:});
             end
             save(fullfile(obj.dataOutputPath, 'SynapseLocatorParams.mat'), 'SynapseLocatorParams')
             
@@ -1509,11 +1479,7 @@ classdef synLoc < handle & synapseLocator.EventData
             obj.statusTextH.String = '';
             drawnow
         end
-        
-        function summaryPlots_Fcn(obj, ~)
-            summaryPlots(obj.synapseLocatorSummary, obj.dRGx, obj.dRGxThreshold)
-        end        
-        
+                
         function elastixCheckerTimer_Fcn(obj, evnt)
             % Add timer to check elastix process!
             if ~isempty(timerfind('Name', 'elastixCheckerTimer'))
@@ -1533,6 +1499,9 @@ classdef synLoc < handle & synapseLocator.EventData
         
         function elastixCheckerTimer_StartFcn(obj)
             % Prepare data for elastix!
+            set(findobj(obj.sLFigH, 'Tag', 'spotsN_edit'), 'String', '');
+            set(findobj(obj.sLFigH, 'Tag', 'labelsN_edit'), 'String', '');
+
             obj.statusTextH.String = 'Register Data (prepare registration) ...';
             drawnow
             
@@ -1685,9 +1654,9 @@ classdef synLoc < handle & synapseLocator.EventData
         end
         
         function tifFiles = tmpDirChecker(obj)
-            % Check tmpImages directory for '_raw', '_mf.tif' and '_prepro.tif' files!
+            % Check tmpImages directory for '_raw', '_mf.tif' and '_proc.tif' files!
             
-            tifFiles = struct('raw', {NaN, NaN}, 'mf', {NaN, NaN}, 'prepro', {NaN, NaN});            
+            tifFiles = struct('raw', {NaN, NaN}, 'mf', {NaN, NaN}, 'proc', {NaN, NaN});            
             for idx = 1:2
                 [~, searchName, searchExt] = fileparts(obj.(['dataFile_', num2str(idx)]));
                 d = dir(fullfile(obj.dataOutputPath, obj.tmpImagesDir));
@@ -1699,8 +1668,8 @@ classdef synLoc < handle & synapseLocator.EventData
                     if strcmp(fileName{:}, [searchName, '_mf', searchExt])
                         tifFiles(idx).mf = fileName{:};
                     end
-                    if strcmp(fileName{:}, [searchName, '_prepro', searchExt])
-                        tifFiles(idx).prepro = fileName{:};
+                    if strcmp(fileName{:}, [searchName, '_proc', searchExt])
+                        tifFiles(idx).proc = fileName{:};
                     end
                 end
             end
@@ -1745,6 +1714,7 @@ classdef synLoc < handle & synapseLocator.EventData
             obj.deconvolveParams = str2double(answer{11});
             tmpData = ScanImageTiffReader(obj.dataFile_1).data;
             obj.imgSize = [obj.vxlSize(1) * size(tmpData, 1); obj.vxlSize(2) * size(tmpData, 2); obj.vxlSize(3) * size(tmpData, 3)];
+            obj.imgSize = obj.imgSize ./ [1; 1; 2]; % Correct z (two-channel image stack)!
             
             % Show values!
             set(findobj(obj.sLFigH, 'Tag', 'voxelSize_edit'), 'String', sprintf('%.2fx%.2fx%.2f', obj.vxlSize));
@@ -1762,28 +1732,21 @@ classdef synLoc < handle & synapseLocator.EventData
                 obj.initialTransformParams = [];
                 set(findobj(obj.sLFigH, 'Tag', 'initialOffset_edit'), 'String', []);
             end
+            
+            drawnow
         end
         
         function spotSummary_Fcn(obj, results)
             % Gather spot characteristics and intensity values!
-            tmpPos_ = round(cat(1,results.spot_center));
-            tmpDia_ = round(cat(1,results.spot_diameters_ellipsoid), 2);
-            obj.synapseLocatorSummary.Spot_ID = [results(:).spot_id]';
-            obj.synapseLocatorSummary.row = tmpPos_(:,1);
-            obj.synapseLocatorSummary.column = tmpPos_(:,2);
-            obj.synapseLocatorSummary.section = tmpPos_(:,3);
-            obj.synapseLocatorSummary.diameter_x = tmpDia_(:,1);
-            obj.synapseLocatorSummary.diameter_y = tmpDia_(:,2);
-            obj.synapseLocatorSummary.diameter_z = tmpDia_(:,3);
-            
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% VERY SPECIAL %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
 %             doPointTransformation = true;
             doPointTransformation = false;
             switch doPointTransformation
                 case true
+%{
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% VERY SPECIAL %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
                     delete(findobj('-regexp', 'Name', 'Voxel Intensity Comparison'))
                     
                     % Get voxel intensities from stack transformed data!
@@ -1798,12 +1761,12 @@ classdef synLoc < handle & synapseLocator.EventData
                     
                     % Add point transformation data to result!
                     results = point_transformation(obj, results);
-                    % Load untransformed 3D data! Always try to load prepro data (should have undergone complete preprocessing)!
+                    % Load untransformed 3D data! Always try to load processed data (should have undergone complete preprocessing)!
                     tifFiles = tmpDirChecker(obj);
                     [~, name_, ~] = fileparts(fullfile(obj.dataOutputPath, obj.tmpImagesDir, obj.('dataFile_2')));
-                    if ischar(tifFiles(1).prepro)
-                        % Load 'prepro' type data!
-                        filename_ = fullfile(obj.dataOutputPath, obj.tmpImagesDir, [name_, '_prepro.tif']);
+                    if ischar(tifFiles(1).proc)
+                        % Load 'proc' type data!
+                        filename_ = fullfile(obj.dataOutputPath, obj.tmpImagesDir, [name_, '_proc.tif']);
                     elseif ischar(tifFiles(1).mf)
                         % Load 'mf' type data!
                         filename_ = fullfile(obj.dataOutputPath, obj.tmpImagesDir, [name_, '_mf.tif']);
@@ -1863,24 +1826,19 @@ classdef synLoc < handle & synapseLocator.EventData
                     grid on; box on
                     legend({'all'; 'max'}, 'Location', 'best')
                     
-                    % Get mean of G0 or (G0 + G1) channel for normalization!
-                    switch obj.dRGx
-                        case 'dR/G0'
-                            tmpMedian_ = median(G0_tp_max);
-                        case 'dR/Gsum'
-                            tmpMedian_ = median([G0_tp_max; G1_tp_max]);
-                    end
+                    % Get mean of G0 channel for normalization!
+                    tmpMedian_ = median(G0_tp_max);
                     
                     channels_text = {'G0', 'R0'}; %!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                     tmpSums_ = zeros(numel(results), 4);
                     tmpN_ = zeros(numel(results), 4);
-                    tmpSumsByN_ = zeros(numel(results), 4);
+                    tmpMean_ = zeros(numel(results), 4);
                     tmpMax_ = zeros(numel(results), 4);
                     for idx = 1:numel(channels_text)
                         tmpValues_ = arrayfun(@(x) obj.data.(channels_text{idx})(results(x).VoxelIdxList), 1:numel(results), 'Uni', 0);
                         tmpN_(:, idx) = cellfun(@numel, tmpValues_);
                         tmpSums_((1 + (idx-1)*numel(results)): (idx*numel(results))) = (cellfun(@(x) (sum(x(:))), tmpValues_))';
-                        tmpSumsByN_((1 + (idx-1)*numel(results)): (idx*numel(results))) = (cellfun(@(x) round(sum(x(:))/numel(x)), tmpValues_))';
+                        tmpMean_((1 + (idx-1)*numel(results)): (idx*numel(results))) = (cellfun(@(x) round(sum(x(:))/numel(x)), tmpValues_))';
                         tmpMax_((1 + (idx-1)*numel(results)): (idx*numel(results))) = (cellfun(@(x) max(x(:)), tmpValues_))';
                     end
                     channels_text = {'G1', 'R1'}; %!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1888,7 +1846,7 @@ classdef synLoc < handle & synapseLocator.EventData
                         tmpValues_ = arrayfun(@(x) tpData.(channels_text{idx})(results(x).VoxelIdxList), 1:numel(results), 'Uni', 0);
                         tmpN_(:, idx+2) = cellfun(@numel, tmpValues_);
                         tmpSums_(:, idx+2) = (cellfun(@(x) (sum(x(:))), tmpValues_))';
-                        tmpSumsByN_(:, idx+2) = (cellfun(@(x) round(sum(x(:))/numel(x)), tmpValues_))';
+                        tmpMean_(:, idx+2) = (cellfun(@(x) round(sum(x(:))/numel(x)), tmpValues_))';
                         tmpMax_(:, idx+2) = (cellfun(@(x) max(x(:)), tmpValues_))';
                     end
                     channels_text = {'G0', 'R0', 'G1', 'R1'}; %!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -1896,7 +1854,7 @@ classdef synLoc < handle & synapseLocator.EventData
                         obj.synapseLocatorSummary.N = tmpN_(:,idx);
                         obj.synapseLocatorSummary.([channels_text{idx}, '_sum']) = tmpSums_(:,idx);
                         obj.synapseLocatorSummary.([channels_text{idx}, '_max']) = tmpMax_(:,idx);
-                        obj.synapseLocatorSummary.([channels_text{idx}, '_sumByN']) = tmpSumsByN_(:,idx);
+                        obj.synapseLocatorSummary.([channels_text{idx}, '_sumByN']) = tmpMean_(:,idx);
                     end
                     
                     tmpSumsNorm = single(tmpSums_) / single(tmpMedian_);
@@ -1933,251 +1891,271 @@ classdef synLoc < handle & synapseLocator.EventData
                         tmpValues_(:,3) = nan(numel(results(results_idx).VoxelIdxList), 1);
                         tmpValues_(tmp_idx,3) = tpData.G1(results(results_idx).VoxelIdxList2(tmp_idx));
                         tmpValues_(tmp_idx,4) = tpData.R1(results(results_idx).VoxelIdxList2(tmp_idx));
-                        [obj.synapseLocatorSummary.rho_g0g1(results_idx,1), obj.synapseLocatorSummary.pval_g0g1(results_idx,1)] = obj.corrCalc(tmpValues_(:,1), tmpValues_(:,3)); % registration quality
-                        [obj.synapseLocatorSummary.rho_g0r1(results_idx,1), obj.synapseLocatorSummary.pval_g0r1(results_idx,1)] = obj.corrCalc(tmpValues_(:,1), tmpValues_(:,4)); % registration quality
-                        [obj.synapseLocatorSummary.rho_g1r1(results_idx,1), obj.synapseLocatorSummary.pval_g1r1(results_idx,1)] = obj.corrCalc(tmpValues_(:,3), tmpValues_(:,4)); % registration quality
-                        [obj.synapseLocatorSummary.rho_g0r0(results_idx,1), obj.synapseLocatorSummary.pval_g0r0(results_idx,1)] = obj.corrCalc(tmpValues_(:,1), tmpValues_(:,2)); % registration quality
-                        [obj.synapseLocatorSummary.rho_r0r1(results_idx,1), obj.synapseLocatorSummary.pval_r0r1(results_idx,1)] = obj.corrCalc(tmpValues_(:,2), tmpValues_(:,4)); % registration quality
-                        if any(isnan(obj.synapseLocatorSummary.rho_g0r1(results_idx,1)))
+                        [obj.synapseLocatorSummary.g0g1_match(results_idx,1), obj.synapseLocatorSummary.pval_g0g1(results_idx,1)] = obj.corrCalc(tmpValues_(:,1), tmpValues_(:,3)); % registration quality
+                        [obj.synapseLocatorSummary.g0r1_match(results_idx,1), obj.synapseLocatorSummary.pval_g0r1(results_idx,1)] = obj.corrCalc(tmpValues_(:,1), tmpValues_(:,4)); % registration quality
+                        [obj.synapseLocatorSummary.g1r1_match(results_idx,1), obj.synapseLocatorSummary.pval_g1r1(results_idx,1)] = obj.corrCalc(tmpValues_(:,3), tmpValues_(:,4)); % registration quality
+                        [obj.synapseLocatorSummary.g0r0_match(results_idx,1), obj.synapseLocatorSummary.pval_g0r0(results_idx,1)] = obj.corrCalc(tmpValues_(:,1), tmpValues_(:,2)); % registration quality
+                        [obj.synapseLocatorSummary.r0r1_match(results_idx,1), obj.synapseLocatorSummary.pval_r0r1(results_idx,1)] = obj.corrCalc(tmpValues_(:,2), tmpValues_(:,4)); % registration quality
+                        if any(isnan(obj.synapseLocatorSummary.g0r1_match(results_idx,1)))
                             keyboard
                         end
                     end
-                                        
-                case false
-                    % Get mean of G0 or (G0 + G1) channel for normalization!
-                    switch obj.dRGx
-                        case 'dR/G0'
-                            channels_text = {'G0'};
-                        case 'dR/Gsum'
-                            channels_text = {'G0', 'G1'};
-                    end
-                    
-                    tmpValues_ = [];
-                    for idx = 1:numel(channels_text)
-                        tmpValues_ = [tmpValues_; cell2mat(arrayfun(@(x) obj.data.(channels_text{idx})(results(x).VoxelIdxList), 1:numel(results), 'Uni', 0)')]; %#ok<AGROW>
-                    end
-                    tmpMedian_ = median(tmpValues_);
-                    %             tmpMean_ = mean(tmpValues_);
-                    
-                    channels_text = {'G0', 'R0', 'G1', 'R1'};
-                    tmpSums_ = zeros(numel(results), 4);
-                    tmpN_ = zeros(numel(results), 4);
-                    tmpSumsByN_ = zeros(numel(results), 4);
-                    tmpMax_ = zeros(numel(results), 4);
-                    for idx = 1:numel(channels_text)
-                        tmpValues_ = arrayfun(@(x) obj.data.(channels_text{idx})(results(x).VoxelIdxList), 1:numel(results), 'Uni', 0);
-                        tmpN_(:, idx) = cellfun(@numel, tmpValues_);
-                        tmpSums_((1 + (idx-1)*numel(results)): (idx*numel(results))) = (cellfun(@(x) (sum(x(:))), tmpValues_))';
-                        tmpSumsByN_((1 + (idx-1)*numel(results)): (idx*numel(results))) = (cellfun(@(x) round(sum(x(:))/numel(x)), tmpValues_))';
-                        tmpMax_((1 + (idx-1)*numel(results)): (idx*numel(results))) = (cellfun(@(x) max(x(:)), tmpValues_))';
-                        
-                        obj.synapseLocatorSummary.N = tmpN_(:,idx);
-                        obj.synapseLocatorSummary.([channels_text{idx}, '_sum']) = tmpSums_(:,idx);
-                        obj.synapseLocatorSummary.([channels_text{idx}, '_max']) = tmpMax_(:,idx);
-                        obj.synapseLocatorSummary.([channels_text{idx}, '_sumByN']) = tmpSumsByN_(:,idx);
-                    end
-                    
-                    tmpSumsNorm = single(tmpSums_) / single(tmpMedian_);
-                    tmpMaxNorm = single(tmpMax_) / single(tmpMedian_);
-                    
-                    channels_text = {'G0', 'R0', 'G1', 'R1'};
-                    for idx = 1:numel(channels_text)
-                        obj.synapseLocatorSummary.([channels_text{idx}, '_sum_norm']) = tmpSumsNorm(:,idx);
-                        obj.synapseLocatorSummary.([channels_text{idx}, '_max_norm']) = tmpMaxNorm(:,idx);
-                    end
-                    
-                    % Calculate channel ratios!
-                    obj.synapseLocatorSummary.r_delta = tmpMax_(:,4) - tmpMax_(:,2); %obj.synapseLocatorSummary.R1_norm - obj.synapseLocatorSummary.R0_norm;
-                    obj.synapseLocatorSummary.r_delta_norm = tmpMaxNorm(:,4) - tmpMaxNorm(:,2); % obj.synapseLocatorSummary.R1_norm - obj.synapseLocatorSummary.R0_norm;
-                    obj.synapseLocatorSummary.g_sum_norm = tmpMaxNorm(:,1) + tmpMaxNorm(:,3); % obj.synapseLocatorSummary.R1_norm - obj.synapseLocatorSummary.R0_norm;
-                    obj.synapseLocatorSummary.r_ratio = (eps + tmpMax_(:,4)) ./ (eps + tmpMax_(:,2));
-                    obj.synapseLocatorSummary.g_ratio = (eps + tmpMax_(:,3)) ./ (eps + tmpMax_(:,1));
-                    obj.synapseLocatorSummary.rg_pre = (eps + tmpMax_(:,2)) ./ (eps + tmpMax_(:,1));
-                    obj.synapseLocatorSummary.rg_post = (eps + tmpMax_(:,4)) ./ (eps + tmpMax_(:,3));
-                    obj.synapseLocatorSummary.r_factor = obj.synapseLocatorSummary.r_delta ./ tmpMax_(:,4);
-                    
-                    obj.synapseLocatorSummary.rDelta_gSum = obj.synapseLocatorSummary.r_delta_norm ./ obj.synapseLocatorSummary.g_sum_norm;
-                    obj.synapseLocatorSummary.rDelta_g0 = obj.synapseLocatorSummary.r_delta_norm ./ tmpMaxNorm(:,1);
-                    
-                    obj.synapseLocatorSummary.VoxelIDs = {results.VoxelIdxList}';
-                    obj.synapseLocatorSummary.VoxelIDs2 = {results.VoxelIdxList}';
-                    
-                    % Calculate roi intensity similarities!
-                    channels_text = {'G0', 'R0', 'G1', 'R1'};
-                    for results_idx = 1:numel(results)
-                        tmpValues_ = cellfun(@(x) obj.data.(x)(results(results_idx).VoxelIdxList), channels_text, 'Uni', 0);
-                        [obj.synapseLocatorSummary.rho_g0g1(results_idx,1), obj.synapseLocatorSummary.pval_g0g1(results_idx,1)] = obj.corrCalc(tmpValues_{1}, tmpValues_{3}); % registration quality
-                        [obj.synapseLocatorSummary.rho_g0r1(results_idx,1), obj.synapseLocatorSummary.pval_g0r1(results_idx,1)] = obj.corrCalc(tmpValues_{1}, tmpValues_{4}); % registration quality
-                        [obj.synapseLocatorSummary.rho_g1r1(results_idx,1), obj.synapseLocatorSummary.pval_g1r1(results_idx,1)] = obj.corrCalc(tmpValues_{3}, tmpValues_{4}); % registration quality
-                        [obj.synapseLocatorSummary.rho_g0r0(results_idx,1), obj.synapseLocatorSummary.pval_g0r0(results_idx,1)] = obj.corrCalc(tmpValues_{1}, tmpValues_{2}); % registration quality
-                        [obj.synapseLocatorSummary.rho_r0r1(results_idx,1), obj.synapseLocatorSummary.pval_r0r1(results_idx,1)] = obj.corrCalc(tmpValues_{2}, tmpValues_{4}); % registration quality
-                        if any(isnan(obj.synapseLocatorSummary.rho_g0r1(results_idx,1)))
-                            keyboard
-                        end
-                    end
-            end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% VERY SPECIAL %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+%}
+                case false
+                    % Get intensity values (=channel data) and calculate ratios!
+                    obj.spotDataCollector_Fcn(results, 'proc');
+                    
+                    tifFiles = tmpDirChecker(obj);
+                    if obj.transformRawData && ~obj.loadRegisteredImages
+                        % Load median filtered data!
+                        if ischar(tifFiles(1).mf)
+                            % Load 'mf' type data!
+                            obj.spotDataCollector_Fcn(results, 'mf');
+                        end
+                        if ischar(tifFiles(1).raw)
+                            % Load raw data!
+                            obj.spotDataCollector_Fcn(results, 'raw');
+                        end
+                    end
+            end
+        end
+        
+        function spotDataCollector_Fcn(obj, results, processingType)
+            synapseLocatorSummary_ = obj.summaryTemplate;
             
-            % Set slots for signal results! Start with NA, set to {0, 1} after running 'find signals'!
-            obj.synapseLocatorSummary.G0matched = nan(numel(results), 1);
-            obj.synapseLocatorSummary.G0matched_probs = nan(numel(results), 1);
-            obj.synapseLocatorSummary.Genericmatched = nan(numel(results), 1);
-            obj.synapseLocatorSummary.Genericmatched_probs = nan(numel(results), 1);
+            % Get values that are used for raw, median filtered, and processed data!
+            tmpPos_ = round(cat(1,results.spot_center));
+            tmpDia_ = round(cat(1,results.spot_diameters_ellipsoid), 1);
+            tmpBB_ = round(cat(1,results.bb), 1);
+            synapseLocatorSummary_.Spot_ID = [results(:).spot_id]';
+            synapseLocatorSummary_.row = tmpPos_(:,1);
+            synapseLocatorSummary_.column = tmpPos_(:,2);
+            synapseLocatorSummary_.section = tmpPos_(:,3);
+            synapseLocatorSummary_.diameter_x = tmpDia_(:,1);
+            synapseLocatorSummary_.diameter_y = tmpDia_(:,2);
+            synapseLocatorSummary_.diameter_z = tmpDia_(:,3);
+            synapseLocatorSummary_.bb_x = tmpBB_(:,1);
+            synapseLocatorSummary_.bb_y = tmpBB_(:,2);
+            synapseLocatorSummary_.bb_z = tmpBB_(:,3);
+            synapseLocatorSummary_.N = [results(:).spotN]';
+            synapseLocatorSummary_.VoxelIDs = {results.VoxelIdxList}';
+            synapseLocatorSummary_.VoxelIDs2 = {results.VoxelIdxList}';
+            synapseLocatorSummary_.edge = ...
+                (ceil(synapseLocatorSummary_.bb_x / 2) > synapseLocatorSummary_.column) |...
+                (ceil(synapseLocatorSummary_.bb_x / 2) > (double(obj.data.sizeStack0(2)) - synapseLocatorSummary_.column)) |...
+                (ceil(synapseLocatorSummary_.bb_y / 2) > synapseLocatorSummary_.row) |...
+                (ceil(synapseLocatorSummary_.bb_y / 2) > (double(obj.data.sizeStack0(1)) - synapseLocatorSummary_.row)) |...
+                (ceil(synapseLocatorSummary_.bb_z / 2) > synapseLocatorSummary_.section) |...
+                (ceil(synapseLocatorSummary_.bb_z / 2) > (double(obj.data.sizeStack0(3)) - synapseLocatorSummary_.section));
+            % Check for edges!
+            if obj.excludeSpotsAtEdges
+                edgeIdx = eq(synapseLocatorSummary_.edge, 1);
+            else
+                edgeIdx = false(numel(results), 1);
+            end
+
+            synapseLocatorSummary_.outlier = false(numel(results), 1);
+            
+            tmpSums_ = zeros(numel(results), 4);
+            tmpMean_ = zeros(numel(results), 4);
+            tmpMedian_ = zeros(numel(results), 4);
+            tmpMax_ = zeros(numel(results), 4);
+            tmpValues_ = cell(numel(results), 4);
+            
+            % Set slots for label results! Start with NA, set to {0, 1} after running 'find signals'!
+            synapseLocatorSummary_.spotMatch = nan(numel(results), 1);
+            synapseLocatorSummary_.spotMatch_probs = nan(numel(results), 1);
+            
+            channels_text = {'G0', 'R0', 'G1', 'R1'};
+
+            switch processingType
+                case 'proc'
+                    for idx = 1:numel(channels_text)
+                        tmpValues_(:, idx) = arrayfun(@(x) obj.data.(channels_text{idx})(results(x).VoxelIdxList), 1:numel(results), 'Uni', 0)';
+                        tmpSums_(:, idx) = (cellfun(@(x) (sum(x(:))), tmpValues_(:, idx)))';
+                        tmpMean_(:, idx) = (cellfun(@(x) round(mean(x)), tmpValues_(:, idx)))';
+                        tmpMedian_(:, idx) = (cellfun(@(x) round(median(x)), tmpValues_(:, idx)))';
+                        tmpMax_(:, idx) = (cellfun(@(x) max(x(:)), tmpValues_(:, idx)))';
+
+                        synapseLocatorSummary_.([channels_text{idx}, '_sum']) = tmpSums_(:,idx);
+                        synapseLocatorSummary_.([channels_text{idx}, '_max']) = tmpMax_(:,idx);
+                        synapseLocatorSummary_.([channels_text{idx}, '_mean']) = tmpMean_(:,idx);
+                        synapseLocatorSummary_.([channels_text{idx}, '_median']) = tmpMedian_(:,idx);
+                    end
+                    
+                    % Check for outlier (default, only R0 is considered)!
+                    Q = quantile(synapseLocatorSummary_.R0_max(~edgeIdx), [0.25, 0.75], 'method', 'exact');
+                    outThresh = Q(2) + 1.5 * (Q(2) - Q(1));
+                    synapseLocatorSummary_.outlier = gt(synapseLocatorSummary_.R0_max, outThresh);
+
+                    % Add registration quality measure! Calculate roi intensity similarities!
+                    [synapseLocatorSummary_.g0g1_match] = cellfun(@(x,y) obj.corrCalc(x, y), tmpValues_(:,1), tmpValues_(:,3));
+                    [synapseLocatorSummary_.g0r1_match] = cellfun(@(x,y) obj.corrCalc(x, y), tmpValues_(:,1), tmpValues_(:,4));
+                    [synapseLocatorSummary_.g1r1_match] = cellfun(@(x,y) obj.corrCalc(x, y), tmpValues_(:,3), tmpValues_(:,4));
+                    [synapseLocatorSummary_.g0r0_match] = cellfun(@(x,y) obj.corrCalc(x, y), tmpValues_(:,1), tmpValues_(:,2));
+                    [synapseLocatorSummary_.r0r1_match] = cellfun(@(x,y) obj.corrCalc(x, y), tmpValues_(:,2), tmpValues_(:,4));
+                    
+                    % Calculate channel ratios (allways from MAX values!!!!)!
+                    means_ = mean(tmpMax_(~synapseLocatorSummary_.outlier & ~edgeIdx,:));
+                    synapseLocatorSummary_.r_delta = (tmpMax_(:,4) - tmpMax_(:,2)) / means_(2);
+                    synapseLocatorSummary_.r_ratio = tmpMax_(:,4) ./ tmpMax_(:,2);
+                    synapseLocatorSummary_.g_ratio = tmpMax_(:,3) ./ tmpMax_(:,1);
+                    synapseLocatorSummary_.rg_pre = (tmpMax_(:,2) / means_(2)) ./ (tmpMax_(:,1) / means_(1));
+                    synapseLocatorSummary_.rg_post = (tmpMax_(:,4) / means_(2)) ./ (tmpMax_(:,3) / means_(1));
+                    synapseLocatorSummary_.r_factor = synapseLocatorSummary_.r_delta ./ (tmpMax_(:,4) / means_(2));                    
+                    synapseLocatorSummary_.rDelta_gSum = synapseLocatorSummary_.r_delta ./ (sum(tmpMax_(:, [1,3]), 2) / means_(1));
+                    synapseLocatorSummary_.rDelta_g0 = synapseLocatorSummary_.r_delta ./ (tmpMax_(:,1) / means_(1));
+                                        
+                    obj.synapseLocatorSummary = synapseLocatorSummary_;
+                    
+                case {'mf', 'raw'}
+                    if obj.upsampling
+                        VoxelIDs_ = cell(numel(results), 1);
+                        for idx = 1:numel(synapseLocatorSummary_.VoxelIDs)
+                            [x,y,z] = ind2sub(size(obj.data.G0), synapseLocatorSummary_.VoxelIDs{idx});
+                            VoxelIDs_{idx} = sub2ind(size(obj.data.G0) ./ [1, 1, 2], x, y, round(z / 2));
+                        end
+                    else
+                        VoxelIDs_ = synapseLocatorSummary_.VoxelIDs;
+                    end
+
+                    if contains(processingType, 'mf')
+                        fileNames = {'G0_mf.tif', 'R0_mf.tif', 'G1_mf_transformed.tif', 'R1_mf_transformed.tif'};
+                    else
+                        fileNames = {'G0_raw.tif', 'R0_raw.tif', 'G1_raw_transformed.tif', 'R1_raw_transformed.tif'};
+                    end
+                    
+                    tmpValues_ = cell(numel(results), 4);
+                    for idx = 1:numel(fileNames)
+                        fPath = fullfile(obj.dataOutputPath, fileNames{idx});
+                        tmpData_ = obj.tifLoader(fPath);
+                        tmpValues_(:, idx) = arrayfun(@(x) tmpData_(VoxelIDs_{x}), 1:numel(results), 'Uni', 0)';
+                    end
+                    clear tmpData_
+
+                    for idx = 1:numel(channels_text)
+                        tmpSums_(:, idx) = (cellfun(@(x) (sum(x(:))), tmpValues_(:, idx)))';
+                        tmpMean_(:, idx) = (cellfun(@(x) round(mean(x)), tmpValues_(:, idx)))';
+                        tmpMedian_(:, idx) = (cellfun(@(x) round(median(x)), tmpValues_(:, idx)))';
+                        tmpMax_(:, idx) = (cellfun(@(x) max(x(:)), tmpValues_(:, idx)))';
+
+                        synapseLocatorSummary_.([channels_text{idx}, '_sum']) = tmpSums_(:,idx);
+                        synapseLocatorSummary_.([channels_text{idx}, '_max']) = tmpMax_(:,idx);
+                        synapseLocatorSummary_.([channels_text{idx}, '_mean']) = tmpMean_(:,idx);
+                        synapseLocatorSummary_.([channels_text{idx}, '_median']) = tmpMedian_(:,idx);
+                    end
+
+                    % Check for outlier (default, only R0 is considered)!
+                    Q = quantile(synapseLocatorSummary_.R0_max(~edgeIdx), [0.25, 0.75], 'method', 'exact');
+                    outThresh = Q(2) + 1.5 * (Q(2) - Q(1));
+                    synapseLocatorSummary_.outlier = gt(synapseLocatorSummary_.R0_max, outThresh);
+
+                    % Add registration quality measure! Calculate roi intensity similarities!
+                    [synapseLocatorSummary_.g0g1_match] = cellfun(@(x,y) obj.corrCalc(x, y), tmpValues_(:,1), tmpValues_(:,3));
+                    [synapseLocatorSummary_.g0r1_match] = cellfun(@(x,y) obj.corrCalc(x, y), tmpValues_(:,1), tmpValues_(:,4));
+                    [synapseLocatorSummary_.g1r1_match] = cellfun(@(x,y) obj.corrCalc(x, y), tmpValues_(:,3), tmpValues_(:,4));
+                    [synapseLocatorSummary_.g0r0_match] = cellfun(@(x,y) obj.corrCalc(x, y), tmpValues_(:,1), tmpValues_(:,2));
+                    [synapseLocatorSummary_.r0r1_match] = cellfun(@(x,y) obj.corrCalc(x, y), tmpValues_(:,2), tmpValues_(:,4));
+                    
+                    % Calculate channel ratios (allways from MAX values!!!!)!
+                    means_ = mean(tmpMax_(~synapseLocatorSummary_.outlier & ~edgeIdx,:));
+                    synapseLocatorSummary_.r_delta = (tmpMax_(:,4) - tmpMax_(:,2)) / means_(2);
+                    synapseLocatorSummary_.r_ratio = tmpMax_(:,4) ./ tmpMax_(:,2);
+                    synapseLocatorSummary_.g_ratio = tmpMax_(:,3) ./ tmpMax_(:,1);
+                    synapseLocatorSummary_.rg_pre = (tmpMax_(:,2) / means_(2)) ./ (tmpMax_(:,1) / means_(1));
+                    synapseLocatorSummary_.rg_post = (tmpMax_(:,4) / means_(2)) ./ (tmpMax_(:,3) / means_(1));
+                    synapseLocatorSummary_.r_factor = synapseLocatorSummary_.r_delta ./ (tmpMax_(:,4) / means_(2));                    
+                    synapseLocatorSummary_.rDelta_gSum = synapseLocatorSummary_.r_delta ./ (sum(tmpMax_(:, [1,3]), 2) / means_(1));
+                    synapseLocatorSummary_.rDelta_g0 = synapseLocatorSummary_.r_delta ./ (tmpMax_(:,1) / means_(1));
+                    
+                    if contains(processingType, 'mf')
+                        obj.synapseLocatorSummary_mf = synapseLocatorSummary_;
+                    end
+                    if contains(processingType, 'raw')
+                        obj.synapseLocatorSummary_raw = synapseLocatorSummary_;
+                    end
+            end
         end
         
         function synapseLocatorSummarySaver(obj)
             
-            Summary = struct2table(obj.synapseLocatorSummary);
-            Summary = Summary(:, obj.summaryFields);
-            if obj.upsampling
-                Summary.section = round(Summary.section ./ 2);
-
-                for idx = 1:height(Summary)
-                    [x,y,z] = ind2sub(size(obj.data.G0), Summary.VoxelIDs{idx});
-                    Summary.VoxelIDs{idx} = sub2ind(size(obj.data.G0) ./ [1, 1, 2], x, y, round(z / 2));
-                end
+            % Get available data types!
+            tifFiles = tmpDirChecker(obj);
+            summaries = cell(0);
+            if ischar(tifFiles(1).proc)
+                summaries = [summaries; '_proc'];
+            end
+            if ischar(tifFiles(1).mf)
+                summaries = [summaries; '_mf'];
+            end
+            if ischar(tifFiles(1).raw)
+                summaries = [summaries; '_raw'];
             end
             
-            % Save synapseLocatorSummary as csv!
-            VoxelIDs_ = Summary{:, strcmp(Summary.Properties.VariableNames, 'VoxelIDs')};
-            VoxelIDs_ = cellfun(@(x) mat2str(x), VoxelIDs_, 'Uni', 0);
-            VoxelIDs2_ = Summary{:, strcmp(Summary.Properties.VariableNames, 'VoxelIDs2')};
-            VoxelIDs2_ = cellfun(@(x) mat2str(x), VoxelIDs2_, 'Uni', 0);
-            Summary_ = Summary(:, ~startsWith(Summary.Properties.VariableNames, 'VoxelIDs'));
-            Summary_{:, 'VoxelIDs'} = VoxelIDs_;
-            Summary_{:, 'VoxelIDs2'} = VoxelIDs2_;
-            writetable(Summary_, fullfile(obj.dataOutputPath, 'SL_Summary.csv'));
-            
-            % Save synapseLocatorSummary as mat!
-            save(fullfile(obj.dataOutputPath, 'SL_Summary.mat'), 'Summary');
+            for summary = summaries(:)'
+                if contains(summary, '_proc')
+                    Summary = struct2table(obj.synapseLocatorSummary);
+                else
+                    Summary = struct2table(obj.(['synapseLocatorSummary', summary{:}]));
+                end
+                if obj.upsampling
+                    Summary.section = round(Summary.section ./ 2);
+                    
+                    for idx = 1:height(Summary)
+                        [x,y,z] = ind2sub(size(obj.data.G0), Summary.VoxelIDs{idx});
+                        Summary.VoxelIDs{idx} = sub2ind(size(obj.data.G0) ./ [1, 1, 2], x, y, round(z / 2));
+                    end
+                end
+                % Save synapseLocatorSummary as csv!
+                Summary{:, 'VoxelIDs'} = cellfun(@(x) mat2str(x), Summary{:, 'VoxelIDs'}, 'Uni', 0);
+                Summary{:, 'VoxelIDs2'} = cellfun(@(x) mat2str(x), Summary{:, 'VoxelIDs2'}, 'Uni', 0);
+                writetable(Summary, fullfile(obj.dataOutputPath, ['SL_Summary', summary{:}, '.csv']));
+                save(fullfile(obj.dataOutputPath, ['SL_Summary', summary{:}, '.mat']), 'Summary');
+            end                
         end
         
-        function synapseLocatorSummarySignalTifSaver(obj, saveastiff_options)            
+        function synapseLocatorSummaryLabelTifSaver(obj, saveastiff_options)            
             % Blow up for better visibility in display!
             se = strel('sphere', 3);
 
             if obj.upsampling
-                stack_ = zeros(size(obj.data.G0) ./ [1, 1, 2], 'uint16');
+                stack_ = zeros(size(obj.data.G0) ./ [1, 1, 2]);
                 idx_ = sub2ind(size(obj.data.G0) ./ [1, 1, 2], obj.synapseLocatorSummary.row, obj.synapseLocatorSummary.column, round(obj.synapseLocatorSummary.section / 2));
             else
-                stack_ = zeros(size(obj.data.G0), 'uint16');
+                stack_ = zeros(size(obj.data.G0));
                 idx_ = sub2ind(size(obj.data.G0), obj.synapseLocatorSummary.row, obj.synapseLocatorSummary.column, obj.synapseLocatorSummary.section);
             end
             
-            % #1 dR/Gx
-            signal_tmp = stack_;
-            switch obj.dRGx
-                case 'dR/G0'
-                    signalIDs_ = gt(obj.synapseLocatorSummary.rDelta_g0, obj.dRGxThreshold);
-                case 'dR/Gsum'
-                    signalIDs_ = gt(obj.synapseLocatorSummary.rDelta_gSum, obj.dRGxThreshold);
-            end
-            signal_tmp(idx_(signalIDs_)) = 1;
-            signal_tmp = imdilate(signal_tmp, se);
-            saveastiff(signal_tmp, fullfile(obj.dataOutputPath, 'SignalSummary.tif'), saveastiff_options);
-
-            % #2 G0matched
-            signal_tmp = stack_;
-            signalIDs_ = eq(obj.synapseLocatorSummary.G0matched, 1);
-            signal_tmp(idx_(signalIDs_)) = 1;
-            signal_tmp = imdilate(signal_tmp, se);
-            saveastiff(signal_tmp, fullfile(obj.dataOutputPath, 'SignalSummary_G0matched.tif'), saveastiff_options);
-            
-            % #3 Genericmatched
-            signal_tmp = stack_;
-            signalIDs_ = eq(obj.synapseLocatorSummary.Genericmatched, 1);
-            signal_tmp(idx_(signalIDs_)) = 1;
-            signal_tmp = imdilate(signal_tmp, se);
-            saveastiff(signal_tmp, fullfile(obj.dataOutputPath, 'SignalSummary_Genericmatched.tif'), saveastiff_options);            
+            % Use calculted dR/G0 values (default params) as 'color'!
+            label_tmp = stack_;
+            label_tmp(idx_) = obj.synapseLocatorSummary.rDelta_g0;            
+            label_tmp = convn(label_tmp, se.Neighborhood, 'same');
+            saveastiff(label_tmp, fullfile(obj.dataOutputPath, 'LabelSummary.tif'), saveastiff_options);
         end
         
-        function summaryDet = deteriorateSummary(obj, dataFile_g0_, dataFile_r0_, dataFile_g1_, dataFile_r1_)
-            
-            fPath = fullfile(obj.dataOutputPath, dataFile_g0_);
-            g0_ = obj.tifLoader(fPath);
-            fPath = fullfile(obj.dataOutputPath, dataFile_r0_);
-            r0_ = obj.tifLoader(fPath);
-            fPath = fullfile(obj.dataOutputPath, dataFile_g1_);
-            g1_ = obj.tifLoader(fPath);
-            fPath = fullfile(obj.dataOutputPath, dataFile_r1_);
-            r1_ = obj.tifLoader(fPath);
-            
-            % Make temporary copy of spotSummary! Gather spot intensity values for mf data!
-            summaryDet = obj.synapseLocatorSummary;
-            if obj.upsampling
-                for idx = 1:numel(summaryDet.VoxelIDs)
-                    [x,y,z] = ind2sub(size(obj.data.G0), summaryDet.VoxelIDs{idx});
-                    summaryDet.VoxelIDs{idx} = sub2ind(size(obj.data.G0) ./ [1, 1, 2], x, y, round(z / 2));
-                end
-            end
-
-            tmpIdx_ = arrayfun(@(x)summaryDet.VoxelIDs{x}, 1:numel(summaryDet.Spot_ID), 'Uni', 0);
-
-                        % Get mean of G0 or (G0 + G1) channel for normalization!
-            switch obj.dRGx
-                case 'dR/G0'
-                    tmpMedian_ = median(cell2mat(cellfun(@(x) g0_(x), tmpIdx_, 'Uni', 0)'));
-                case 'dR/Gsum'
-                    tmpMedian_ = median(cell2mat(cellfun(@(x) [g0_(x);g1_(x)], tmpIdx_, 'Uni', 0)'));
-            end
-            
-            summaryDet.G0_max = cell2mat(cellfun(@(x) max(g0_(x)), tmpIdx_, 'Uni', 0)');
-            summaryDet.G0_max_norm = summaryDet.G0_max / tmpMedian_;
-            summaryDet.G0_sum = cell2mat(cellfun(@(x) sum(g0_(x)), tmpIdx_, 'Uni', 0)');
-            summaryDet.G0_sum_norm = summaryDet.G0_sum / tmpMedian_;            
-            summaryDet.G1_max = cell2mat(cellfun(@(x) max(g1_(x)), tmpIdx_, 'Uni', 0)');
-            summaryDet.G1_max_norm = summaryDet.G1_max / tmpMedian_;
-            summaryDet.G1_sum = cell2mat(cellfun(@(x) sum(g1_(x)), tmpIdx_, 'Uni', 0)');
-            summaryDet.G1_sum_norm = summaryDet.G1_sum / tmpMedian_;
-            summaryDet.R0_max = cell2mat(cellfun(@(x) max(r0_(x)), tmpIdx_, 'Uni', 0)');
-            summaryDet.R0_max_norm = summaryDet.R0_max / tmpMedian_;
-            summaryDet.R0_sum = cell2mat(cellfun(@(x) sum(r0_(x)), tmpIdx_, 'Uni', 0)');
-            summaryDet.R0_sum_norm = summaryDet.R0_sum / tmpMedian_;            
-            summaryDet.R1_max = cell2mat(cellfun(@(x) max(r1_(x)), tmpIdx_, 'Uni', 0)');
-            summaryDet.R1_max_norm = summaryDet.R1_max / tmpMedian_;
-            summaryDet.R1_sum = cell2mat(cellfun(@(x) sum(r1_(x)), tmpIdx_, 'Uni', 0)');
-            summaryDet.R1_sum_norm = summaryDet.R1_sum / tmpMedian_;
-                        
-            summaryDet.r_delta = summaryDet.R1_max - summaryDet.R0_max;
-            summaryDet.r_delta_norm = summaryDet.R1_max_norm - summaryDet.R0_max_norm;
-            summaryDet.g_sum_norm = summaryDet.G0_max_norm + summaryDet.G1_max_norm;            
-            summaryDet.r_ratio = (eps + summaryDet.R1_max) ./ (eps + summaryDet.R0_max);            
-            summaryDet.g_ratio = (eps + summaryDet.G1_max) ./ (eps + summaryDet.G0_max);            
-            summaryDet.rg_pre = (eps + summaryDet.R0_max) ./ (eps + summaryDet.G0_max);            
-            summaryDet.rg_post = (eps + summaryDet.R1_max) ./ (eps + summaryDet.G1_max);
-            summaryDet.r_factor = summaryDet.r_delta ./ summaryDet.R1_max;
-            
-            summaryDet.rDelta_gSum = summaryDet.r_delta_norm ./ summaryDet.g_sum_norm;
-            summaryDet.rDelta_g0 = summaryDet.r_delta_norm ./ summaryDet.G0_max_norm;
-        end
-
         function roiData = roiData_Fcn(obj)
             % Gather feature data for active rois!
             % There should be points for both classes, unless a new roi is
             % added to an existing model!
-%             if all([numel(obj.class1_roi), numel(obj.class2_roi)])
-                % Gather features keeping the order of features names from obj.featureNames!
-                voxels_1 = arrayfun(@(x) obj.class1_roi{x}.pixels, 1:numel(obj.class1_roi), 'Uni', 0);
-                voxels_1 = cat(1, voxels_1{:});
-                voxels_2 = arrayfun(@(x) obj.class2_roi{x}.pixels, 1:numel(obj.class2_roi), 'Uni', 0);
-                voxels_2 = cat(1, voxels_2{:});
-                data_1 = zeros(numel(voxels_1), numel(obj.featureNames));
-                data_2 = zeros(numel(voxels_2), numel(obj.featureNames));
-                for featureNameIdx_ = 1:numel(obj.featureNames)
-                    m = matfile(fullfile(obj.featureDataDir, [obj.featureNames{featureNameIdx_}, '.mat']));
-%                     m = matfile(fullfile(obj.dataInputPath, obj.featureDataBaseDir, [obj.featureNames{featureNameIdx_}, '.mat']));
-                    data_1(:, featureNameIdx_) = arrayfun(@(x) m.stack(x, 1), voxels_1);
-                    data_2(:, featureNameIdx_) = arrayfun(@(x) m.stack(x, 1), voxels_2);
-                end                
-                roiData = [data_1; data_2];
-                labels = [zeros(size(data_1,1), 1); ones(size(data_2,1), 1)]; % class 0 is spine
-                roiData = unique([roiData, labels], 'rows');
-%             else
-%                 roiData = [];
-%             end            
+            % Gather features keeping the order of features names from obj.featureNames!
+            voxels_1 = arrayfun(@(x) obj.class1_roi{x}.pixels, 1:numel(obj.class1_roi), 'Uni', 0);
+            voxels_1 = cat(1, voxels_1{:});
+            voxels_2 = arrayfun(@(x) obj.class2_roi{x}.pixels, 1:numel(obj.class2_roi), 'Uni', 0);
+            voxels_2 = cat(1, voxels_2{:});
+            data_1 = zeros(numel(voxels_1), numel(obj.featureNames));
+            data_2 = zeros(numel(voxels_2), numel(obj.featureNames));
+            for featureNameIdx_ = 1:numel(obj.featureNames)
+                m = matfile(fullfile(obj.featureDataDir, [obj.featureNames{featureNameIdx_}, '.mat']));
+                data_1(:, featureNameIdx_) = arrayfun(@(x) m.stack(x, 1), voxels_1);
+                data_2(:, featureNameIdx_) = arrayfun(@(x) m.stack(x, 1), voxels_2);
+            end
+            roiData = [data_1; data_2];
+            labels = [zeros(size(data_1,1), 1); ones(size(data_2,1), 1)]; % class 0 is spot
+            roiData = unique([roiData, labels], 'rows');
         end
         
         function cmdPID_Fcn(obj)
@@ -2204,22 +2182,41 @@ classdef synLoc < handle & synapseLocator.EventData
             else
                 out = in;
             end
-        end
-        
-        function [rho_, pval_] = corrCalc(~, values1, values2)
-            % Avoid reporting NaN results for uniform input values!
-            
-            if eq(numel(unique(values1)), 1) || eq(numel(unique(values2)), 1)
-                rho_ = 0;
-                pval_ = 1;
-            else
-                [rho_, pval_] = corr(single(values1), single(values2), 'Type', 'Spearman', 'Rows', 'complete');
-            end
-        end
+        end        
     end
     
     % Static methods
     methods(Static)
+        function [rho_] = corrCalc(values1, values2)
+        % function [rho_, pval_] = corrCalc(values1, values2)
+            % Avoid reporting NaN results for uniform input values!
+            
+            if eq(numel(unique(values1)), 1) || eq(numel(unique(values2)), 1)
+                rho_ = zeros(1, 1, 'single');
+                % pval_ = ones(1, 1, 'single');
+            else
+                % [rho_, pval_] = corr(single(values1), single(values2), 'Type', 'Spearman', 'Rows', 'complete');
+                [rho_] = fastCorr(single(values1), single(values2));
+            end
+        end
+        
+        function [rho] = fastCorr(A, B)
+            % Use minimal code to calculate Pearson correlation coefficient! Quite
+            % fast in this context (spot intensity values)! Expects no NaNs! Skip
+            % calculation of pvalues!
+            xy = dot(A, B);
+            n = numel(A);
+            mx = sum(A) / n;
+            my = sum(B) / n;
+            x2 = dot(A, A);
+            y2 = dot(B, B);
+            sx = sqrt(x2 - n .* (mx.^2));  % sx, sy - standard deviations
+            sy = sqrt(y2 - n .* (my.^2));
+            rho = (xy - n .* mx .* my) ./ (sx .* sy);      % correlation coefficient
+            % t = coef .* sqrt((n - 2) ./ (1 - coef.^2));  % t-test statistic
+            % p = 2*tcdf(-abs(t), n - 2); % pvalue
+        end
+        
         function result = tops(x, n)
             % Calculate median and sum from top n entries in vector x!
             
