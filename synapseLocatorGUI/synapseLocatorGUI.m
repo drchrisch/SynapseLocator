@@ -25,7 +25,7 @@ function varargout = synapseLocatorGUI(varargin)
 
 % Edit the above text to modify the response to help synapseLocatorGUI
 
-% Last Modified by GUIDE v2.5 11-Jan-2019 14:12:50
+% Last Modified by GUIDE v2.5 19-Dec-2019 09:59:55
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
@@ -44,9 +44,7 @@ if nargout
 else
     gui_mainfcn(gui_State, varargin{:});
 end
-% End initialization code - DO NOT EDIT
 
-% --- Executes just before synapseLocatorGUI is made visible.
 function synapseLocatorGUI_OpeningFcn(hObject, eventdata, handles, varargin)
 % This function has no output args, see OutputFcn.
 % hObject    handle to figure
@@ -93,6 +91,19 @@ UD.imageIntRMax = 1;
 UD.imageMax = struct('G', [], 'R', []);
 set(handles.synapseLocator_figure, 'UserData', UD)
 
+% Open summary table and add handle to synapseLocator object!
+handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH = synapseLocatorSummaryTable();
+handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.UserData.sLobj = handles.synapseLocator_figure.UserData.sLobj;
+handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.Visible = 'off';
+
+% Adjust some summary table figure settings
+% Set 'Mode'!
+set(findobj(handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH, 'Tag', 'mode_all_radiobutton'), 'Value', 1)
+% Set 'Process'!
+set(findobj(handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH, 'Tag', 'dataProcessType_processed_radiobutton'), 'Value', 1)
+% Set table sort to dR/G0!
+set(findobj(handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH, 'Tag', 'sortBy_dRG0_radiobutton'), 'Value', 1)
+
 % Set standard operation to single step process control mode!
 handles.nStepProcess_pushbutton.String = '2';
 handles.runElastix_pushbutton.Visible = 'off';
@@ -105,22 +116,19 @@ handles.run_pushbutton.Visible = 'on';
 % Set leading channel to value defined in Synapse Locator parameter file!
 handles.(['leadingChannel_', UD.sLobj.leadingChannel, '_radiobutton']).Value = 1;
 
-% Set spine detection specificity threshold!
+% Set spot detection specificity threshold!
 handles.spotSpecificity_edit.String = num2str(UD.sLobj.spotSpecificity);
 
 % Set spot detection bwconncompValue!
 id_ = strcmp(num2str(UD.sLobj.bwconncompValue), {handles.bwconncompValue_uibuttongroup.Children.String});
 handles.bwconncompValue_uibuttongroup.Children(id_).Value = 1;
 
-% Set dR/Gx calculation method!
-id_ = strcmp(UD.sLobj.dRGx, {handles.dRGx_uibuttongroup.Children.String});
-handles.dRGx_uibuttongroup.Children(id_).Value = 1;
-
 % Set signal detection specificity threshold!
-handles.dRGxThreshold_edit.String = num2str(UD.sLobj.dRGxThreshold);
+handles.dRG0Threshold_edit.String = num2str(UD.sLobj.dRG0Threshold);
 
-% Set signal detection specificity threshold!
-handles.G0matchThreshold_edit.String = num2str(UD.sLobj.G0matchThreshold);
+% Set edge filter (defaults to o)!
+handles.excludeSpotsAtEdges_radiobutton.Value = UD.sLobj.excludeSpotsAtEdges;
+
 
 % Set params for initial image filter!
 % % Set median filter/gaussian smoothing!
@@ -129,14 +137,14 @@ handles.G0matchThreshold_edit.String = num2str(UD.sLobj.G0matchThreshold);
 handles.data1Threshold_edit.String = num2str(UD.sLobj.data1Threshold);
 handles.data1Threshold_edit.String = num2str(UD.sLobj.data2Threshold);
 
-% Set threshold for spine finding!
+% Set threshold for spot finding!
 handles.g0_threshold_edit.String = num2str(UD.sLobj.g0_threshold);
 handles.g0_threshold_edit.String = num2str(UD.sLobj.g1_threshold);
 
 % handles.voxelSize_edit.String = sprintf('%.2fx%.2fx%.2f', UD.sLobj.vxlSize);
 handles.voxelSize_edit.String = [];
 
-% Set params for spine size filter!
+% Set params for spot size filter!
 handles.spotSizeXmin_edit.String = num2str(UD.sLobj.spotSizeMin(1));
 handles.spotSizeYmin_edit.String = num2str(UD.sLobj.spotSizeMin(2));
 handles.spotSizeZmin_edit.String = num2str(UD.sLobj.spotSizeMin(3));
@@ -161,15 +169,6 @@ handles.synapseLocator_figure.Pointer = 'watch';
 notify(handles.synapseLocator_figure.UserData.sLobj, 'loadModel', {'default'; UD.sLobj.genericSpotModel})
 handles.synapseLocator_figure.Pointer = 'arrow';
 
-
-% Get generic signal model! Screen wekaModels directory!
-handles.synapseLocator_figure.UserData.sLobj.data.signalModel_generic_model = wekaLoadModel(...
-    fullfile(...
-    handles.synapseLocator_figure.UserData.sLobj.synapseLocatorFolder, ...
-    handles.synapseLocator_figure.UserData.sLobj.wekaModelsFolder, ...
-    [UD.sLobj.genericSignalModel, '.model'])...
-    );
-
 % Set raw transformation buton (defaults to off)!
 handles.transformRawData_radiobutton.Value = UD.sLobj.transformRawData;
 
@@ -179,6 +178,9 @@ handles.sum2_radiobutton.Value = UD.sLobj.sum2;
 % Set upsampling button (defaults to off)!
 handles.upsampling_radiobutton.Value = UD.sLobj.upsampling;
 
+% Set non-elastix initial transformation status!
+handles.initialTransform_radiobutton.Value = UD.sLobj.initialTransform;
+
 % Activate/Deactivate filter (defaults to on)!
 handles.filterImages_radiobutton.Value = UD.sLobj.filterImages;
 
@@ -187,8 +189,8 @@ id_ = strcmp(UD.sLobj.apparentSimilarity, {handles.apparentSimilarity_uibuttongr
 handles.apparentSimilarity_uibuttongroup.Children(id_).Value = 1;
 
 % Set label density!
-id_ = strcmp(UD.sLobj.labelDensity, {handles.labelDensity_uibuttongroup.Children.String});
-handles.labelDensity_uibuttongroup.Children(id_).Value = 1;
+id_ = strcmp(UD.sLobj.markerDensity, {handles.markerDensity_uibuttongroup.Children.String});
+handles.markerDensity_uibuttongroup.Children(id_).Value = 1;
 
 % Set registration run mode!
 rmH = findobj('-regexp', 'Tag', 'Registration_radiobutton');
@@ -218,17 +220,15 @@ handles.avgSpotSize_uibuttongroup.Children(id_).Value = 1;
 % Set value for making composite tif when saving results!
 handles.compositeTif_radiobutton.Value = UD.sLobj.compositeTif;
 
-% Open summary table and add handle to synapseLocator object!
-handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH = synapseLocatorSummaryTable(handles.synapseLocator_figure.UserData.sLobj);
-handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.Visible = 'off';
-
 % Configure image axes!
 UD.sLobj.imageAxesH.XTickLabel = [];
 UD.sLobj.imageAxesH.YTickLabel = [];
 handles.synapseLocator_figure.UserData.zoomH = [];
 
-% Set summary table!
+% Set (dummy) summary table!
 handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary = handles.synapseLocator_figure.UserData.sLobj.summaryTemplate;
+handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary_mf = handles.synapseLocator_figure.UserData.sLobj.summaryTemplate;
+handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary_raw = handles.synapseLocator_figure.UserData.sLobj.summaryTemplate;
 
 % Resize main window!
 h = handles.parameter_togglebutton;
@@ -240,7 +240,6 @@ handles.statusText_text.String = '';
 
 return
 
-% --- Outputs from this function are returned to the command line.
 function varargout = synapseLocatorGUI_OutputFcn(hObject, eventdata, handles)
 % varargout  cell array for returning output args (see VARARGOUT);
 % hObject    handle to figure
@@ -250,7 +249,6 @@ function varargout = synapseLocatorGUI_OutputFcn(hObject, eventdata, handles)
 % Get default command line output from handles structure
 varargout{1} = handles.output;
 
-% --- Executes when user attempts to close synapseLocator_figure.
 function synapseLocator_figure_CloseRequestFcn(hObject, eventdata, handles)
 % hObject    handle to synapseLocator_figure (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -268,9 +266,7 @@ function synapseLocator_figure_CloseRequestFcn(hObject, eventdata, handles)
           delete(handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH);
           delete(hObject);
           delete(findobj('Name', 'Spot Intensity Overview'))
-          delete(findobj('Name', 'Spot Intensity Overview II'))
-          delete(findobj('Name', 'Spot Intensity Overview III'))
-%           delete(findobj('Name', 'Signal Intensity Overview'))
+          delete(findobj('Name', 'Spot Intensity Histogram'))
       case 'No'
       return 
    end
@@ -279,7 +275,6 @@ delete(hObject)
 
 return
 
-% --- Executes on button press in parameter_togglebutton.
 function parameter_togglebutton_Callback(hObject, eventdata, handles)
 % hObject    handle to parameter_togglebutton (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -296,7 +291,6 @@ end
 
 return
 
-% --- Executes on button press in expertParameters_togglebutton.
 function expertParameters_togglebutton_Callback(hObject, eventdata, handles)
 % hObject    handle to expertParameters_togglebutton (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -344,25 +338,34 @@ return
 
 %%
 % Load data, set preprocessing %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-function loadTransformed_radiobutton_Callback(hObject, eventdata, handles)
-% hObject    handle to loadTransformed_radiobutton (see GCBO)
+function loadRegisteredImages_radiobutton_Callback(hObject, eventdata, handles)
+% hObject    handle to loadRegisteredImages_radiobutton (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
 % Load already transformed data! Swith on/off filter options panel!
-handles.synapseLocator_figure.UserData.sLobj.loadTransformed = hObject.Value;
+handles.synapseLocator_figure.UserData.sLobj.loadRegisteredImages = hObject.Value;
 if hObject.Value
     handles.imagePreProcessing_uipanel.Visible = 'off';
     handles.registrationParams_uipanel.Visible = 'off';
-%     handles.filterImages_radiobutton.Value = 1;
     handles.filterOptions_uipanel.Visible = 'off';
 else
     handles.filterOptions_uipanel.Visible = 'on';
     handles.registrationParams_uipanel.Visible = 'on';
-%     handles.filterImages_radiobutton.Value = 0;
     handles.imagePreProcessing_uipanel.Visible = 'on';
 end
 
+preProParamsChanged(handles)
+
+return
+
+function initialTransform_radiobutton_Callback(hObject, eventdata, handles)
+% hObject    handle to initialTransform_radiobutton (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Set initial transformation!
+handles.synapseLocator_figure.UserData.sLobj.initialTransform = hObject.Value;
 
 preProParamsChanged(handles)
 
@@ -373,7 +376,7 @@ function smoothing_uibuttongroup_SelectionChangedFcn(hObject, eventdata, handles
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Set channel to use for spine detection!
+% Set channel to use for spot detection!
 inputSelection = get(hObject, 'Tag');
 
 switch inputSelection
@@ -425,7 +428,6 @@ preProParamsChanged(handles)
 
 return
 
-% --- Executes on button press in filterImages_radiobutton.
 function filterImages_radiobutton_Callback(hObject, eventdata, handles)
 % hObject    handle to filterImages_radiobutton (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -454,13 +456,13 @@ preProParamsChanged(handles)
 
 return
 
-% --- Executes on button press in imgHistograms_pushbutton.
 function imgHistograms_pushbutton_Callback(hObject, eventdata, handles)
 % hObject    handle to imgHistograms_pushbutton (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-delete(findobj('-regexp', 'Name', 'Intensity Histogram'))
+% delete(findobj('-regexp', 'Name', 'Intensity Histogram'))
+delete(findobj('Name', 'Intensity Histogram'))
 
 figure('Name', 'Intensity Histogram', 'NumberTitle', 'off', 'Position', [1200 200 800 500], 'Units', 'pixels')
 
@@ -491,7 +493,7 @@ function leadingChannelSelect_uibuttongroup_SelectionChangedFcn(hObject, eventda
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Set channel to use for spine detection!
+% Set channel to use for spot detection!
 inputSelection = get(hObject, 'Tag');
 
 switch inputSelection
@@ -500,18 +502,6 @@ switch inputSelection
     case 'leadingChannel_R_radiobutton'
         handles.synapseLocator_figure.UserData.sLobj.leadingChannel = 'R';
 end
-
-elastixParamsChanged(handles)
-
-return
-
-function initialTransform_radiobutton_Callback(hObject, eventdata, handles)
-% hObject    handle to initialTransform_radiobutton (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Set initial transformation!
-handles.synapseLocator_figure.UserData.sLobj.initialTransform = hObject.Value;
 
 elastixParamsChanged(handles)
 
@@ -556,8 +546,8 @@ function apparentSimilarity_uibuttongroup_SelectionChangedFcn(hObject, eventdata
 inputSelection = get(hObject, 'Tag');
 
 switch inputSelection
-    case 'apparentSimilarity_high_radiobutton'
-        handles.synapseLocator_figure.UserData.sLobj.apparentSimilarity = 'high';
+    case 'apparentSimilarity_good_radiobutton'
+        handles.synapseLocator_figure.UserData.sLobj.apparentSimilarity = 'good';
     case 'apparentSimilarity_average_radiobutton'
         handles.synapseLocator_figure.UserData.sLobj.apparentSimilarity = 'average';
     case 'apparentSimilarity_poor_radiobutton'
@@ -568,8 +558,8 @@ elastixParamsChanged(handles)
 
 return
 
-function labelDensity_uibuttongroup_SelectionChangedFcn(hObject, eventdata, handles)
-% hObject    handle to the selected object in labelDensity_uibuttongroup 
+function markerDensity_uibuttongroup_SelectionChangedFcn(hObject, eventdata, handles)
+% hObject    handle to the selected object in markerDensity_uibuttongroup 
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
@@ -577,12 +567,12 @@ function labelDensity_uibuttongroup_SelectionChangedFcn(hObject, eventdata, hand
 inputSelection = get(hObject, 'Tag');
 
 switch inputSelection
-    case 'labelDensity_med_radiobutton'
-        handles.synapseLocator_figure.UserData.sLobj.labelDensity = 'med';
-    case 'labelDensity_low_radiobutton'
-        handles.synapseLocator_figure.UserData.sLobj.labelDensity = 'low';
-    case 'labelDensity_verylow_radiobutton'
-        handles.synapseLocator_figure.UserData.sLobj.labelDensity = 'verylow';
+    case 'markerDensity_high_radiobutton'
+        handles.synapseLocator_figure.UserData.sLobj.markerDensity = 'high';
+    case 'markerDensity_medium_radiobutton'
+        handles.synapseLocator_figure.UserData.sLobj.markerDensity = 'medium';
+    case 'markerDensity_low_radiobutton'
+        handles.synapseLocator_figure.UserData.sLobj.markerDensity = 'low';
 end
 
 elastixParamsChanged(handles)
@@ -630,24 +620,24 @@ function histogramN_uibuttongroup_SelectionChangedFcn(hObject, eventdata, handle
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Set neighborhood value for spine detection!
+% Set histogram size for registration!
 inputSelection = get(hObject, 'Tag');
 
 switch inputSelection
-    case 'histogramN_4_radiobutton'
-        handles.synapseLocator_figure.UserData.sLobj.histogramN = 4;
-    case 'histogramN_8_radiobutton'
-        handles.synapseLocator_figure.UserData.sLobj.histogramN = 8;
     case 'histogramN_16_radiobutton'
         handles.synapseLocator_figure.UserData.sLobj.histogramN = 16;
+    case 'histogramN_24_radiobutton'
+        handles.synapseLocator_figure.UserData.sLobj.histogramN = 24;
     case 'histogramN_32_radiobutton'
         handles.synapseLocator_figure.UserData.sLobj.histogramN = 32;
+    case 'histogramN_48_radiobutton'
+        handles.synapseLocator_figure.UserData.sLobj.histogramN = 48;
     case 'histogramN_64_radiobutton'
         handles.synapseLocator_figure.UserData.sLobj.histogramN = 64;
+    case 'histogramN_96_radiobutton'
+        handles.synapseLocator_figure.UserData.sLobj.histogramN = 96;
     case 'histogramN_128_radiobutton'
         handles.synapseLocator_figure.UserData.sLobj.histogramN = 128;
-    case 'histogramN_256_radiobutton'
-        handles.synapseLocator_figure.UserData.sLobj.histogramN = 256;
 end
 
 elastixParamsChanged(handles)
@@ -728,8 +718,6 @@ programmatic_zLevel(handles, val)
 
 return
 
-% --- If Enable == 'on', executes on mouse press in 5 pixel border.
-% --- Otherwise, executes on mouse press in 5 pixel border or over class1_listbox.
 function class1_listbox_ButtonDownFcn(hObject, eventdata, handles)
 % hObject    handle to class1_listbox (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -754,8 +742,6 @@ end
 
 return
 
-% --- If Enable == 'on', executes on mouse press in 5 pixel border.
-% --- Otherwise, executes on mouse press in 5 pixel border or over class2_listbox.
 function class2_listbox_ButtonDownFcn(hObject, eventdata, handles)
 % hObject    handle to class2_listbox (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -901,6 +887,10 @@ function showROI_radiobutton_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 % Hint: get(hObject,'Value') returns toggle state of showROI_radiobutton
 
+if isempty(handles.synapseLocator_figure.UserData.sLobj.data.G0)
+    return
+end
+
 % Simply click zLevel slider!
 programmatic_zLevel(handles)
 
@@ -946,7 +936,6 @@ locatorParamsChanged(handles)
 
 return
 
-% --- Executes on button press in clearModel_pushbutton.
 function clearModel_pushbutton_Callback(hObject, eventdata, handles)
 % hObject    handle to clearModel_pushbutton (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -959,7 +948,6 @@ handles.synapseLocator_figure.Pointer = 'arrow';
 
 return
 
-% --- Executes on button press in saveModel_pushbutton.
 function saveModel_pushbutton_Callback(hObject, eventdata, handles)
 % hObject    handle to saveModel_pushbutton (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -972,7 +960,6 @@ handles.synapseLocator_figure.Pointer = 'arrow';
 
 return
 
-% --- Executes on button press in modelQuality_pushbutton.
 function modelQuality_pushbutton_Callback(hObject, eventdata, handles)
 % hObject    handle to modelQuality_pushbutton (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -982,7 +969,6 @@ notify(handles.synapseLocator_figure.UserData.sLobj, 'modelQuality')
 
 return
 
-% --- Executes on button press in featureStats_pushbutton.
 function featureStats_pushbutton_Callback(hObject, eventdata, handles)
 % hObject    handle to featureStats_pushbutton (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -1023,7 +1009,7 @@ function bwconncompValue_uibuttongroup_SelectionChangedFcn(hObject, eventdata, h
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Set neighborhood value for spine detection!
+% Set neighborhood value for spot detection!
 inputSelection = get(hObject, 'Tag');
 
 switch inputSelection
@@ -1172,6 +1158,32 @@ locatorParamsChanged(handles)
 
 return
 
+%%
+% Label report %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+function dRG0Threshold_edit_Callback(hObject, eventdata, handles)
+% hObject    handle to dRG0Threshold_edit (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+val = str2double(get(hObject,'String'));
+handles.synapseLocator_figure.UserData.sLobj.dRG0Threshold = val;
+
+locatorParamsChanged(handles)
+
+return
+
+function excludeSpotsAtEdges_radiobutton_Callback(hObject, eventdata, handles)
+% hObject    handle to excludeSpotsAtEdges_radiobutton (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+% Hint: get(hObject,'Value') returns toggle state of excludeSpotsAtEdges_radiobutton
+
+val = get(hObject, 'Value');
+handles.synapseLocator_figure.UserData.sLobj.excludeSpotsAtEdges = val;
+
+locatorParamsChanged(handles)
+
+return
 
 %%
 % Load data %%%%%%%%%%5%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1220,23 +1232,30 @@ if all([~handles.synapseLocator_figure.UserData.sLobj.resultSaved, ~isempty(hand
     end
 end
 
-% Clear summary figures!
-delete(findobj('-regexp', 'Name', 'Spot Intensity Overview'))
-delete(findobj('-regexp', 'Name', 'Spot Intensity Overview (norm)'))
-delete(findobj('-regexp', 'Name', 'Spot Intensity Overview II'))
-delete(findobj('-regexp', 'Name', 'Spot Intensity Overview III'))
-delete(findobj('-regexp', 'Name', 'Spot Intensity Overview EXTRA'))
-
 % Reset spot finder summary!
+handles.label_default_radiobutton.Value = 1;
+% Clear summary figures!
+sSLSTH = handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH;
+sSLSTH.UserData.allData = [];
+sSLSTH.UserData.tmpData = [];
+set(findobj(sSLSTH, 'Type', 'uitable'), 'Data', [])
+myFields = {'processed', 'medFiltered', 'raw'};
+for myField = myFields
+    sSLSTH.UserData.spotIntensityHistogramData.(myField{:}) = [];
+    sSLSTH.UserData.spotIntensityOverviewData.(myField{:}) = [];
+end
+delete(findobj('-regexp', 'Name', 'Spot Intensity Histogram'))
+delete(findobj('-regexp', 'Name', 'Spot Intensity Overview'))
+
 % Set summary table!
 handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary = handles.synapseLocator_figure.UserData.sLobj.summaryTemplate;
-handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH = synapseLocatorSummaryTable(handles.synapseLocator_figure.UserData.sLobj);
-handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.Visible = 'off';
+handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary_mf = [];
+handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary_raw = [];
 
 clearSignalFeatureDataDir(handles)
 
 % Reset data fields in figure and synapseLocator object!
-myFields = {'signalsN_edit', 'spotsN_edit', 'initialOffset_edit', 'preTransformationMatch_edit', 'postTransformationMatch_edit'};
+myFields = {'labelsN_edit', 'spotsN_edit', 'initialOffset_edit', 'preTransformationMatch_edit', 'postTransformationMatch_edit'};
 for myField = myFields
     handles.(myField{:}).String = {};
 end
@@ -1252,7 +1271,6 @@ for myField = myFields
     handles.synapseLocator_figure.UserData.sLobj.(myField{:}) = {};
 end
 
-%     'targetMaskFile', 'movedMaskFile', ...
 myFields = {...
     'dataOutputPath', ...
     'dataFile_1', 'dataFile_2', ...
@@ -1263,11 +1281,6 @@ myFields = {...
 for myField = myFields
     handles.synapseLocator_figure.UserData.sLobj.(myField{:}) = [];
 end
-
-% myFields = {'loadTransformed'};
-% for myField = myFields
-%     handles.synapseLocator_figure.UserData.sLobj.(myField{:}) = 0;
-% end
 
 myFields = {'G0', 'R0', 'G1', 'R1', 'spot_classProbs', 'spot_classProbsStack', 'spot_predicted', 'spot_predictedStack', 'signalModel_G0'};
 for myField = myFields
@@ -1289,6 +1302,18 @@ for myField = myFields
 end
 
 handles.synapseLocator_figure.UserData.sLobj.resultSaved = 0;
+
+handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH = synapseLocatorSummaryTable(handles.synapseLocator_figure.UserData.sLobj);
+handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.Visible = 'off';
+
+handles.spot_uipanel.FontWeight = 'normal';
+handles.spot_class_radiobutton.Value = 1;
+handles.spot_class_radiobutton.Enable = 'off';
+handles.spot_probs_radiobutton.Enable = 'off';
+handles.label_uipanel.FontWeight = 'normal';
+handles.label_default_radiobutton.Value = 1;
+handles.label_default_radiobutton.Enable = 'off';
+handles.label_custom_radiobutton.Enable = 'off';
 
 cla(handles.image_axes, 'reset')
 
@@ -1312,6 +1337,9 @@ function displayChannel_uibuttongroup_SelectionChangedFcn(hObject, eventdata, ha
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
+if isempty(handles.synapseLocator_figure.UserData.sLobj.data.G0)
+    return
+end
 
 handles.synapseLocator_figure.UserData.sLobj.displayChannel = hObject.String;
 handles.synapseLocator_figure.UserData.zoomXLim = handles.image_axes.XLim;
@@ -1330,6 +1358,10 @@ function minIntensityG_edit_Callback(hObject, eventdata, handles)
 % Hints: get(hObject,'String') returns contents of minIntensityG_edit as text
 %        str2double(get(hObject,'String')) returns contents of minIntensityG_edit as a double
 
+if isempty(handles.synapseLocator_figure.UserData.sLobj.data.G0)
+    return
+end
+
 val = str2double(get(hObject,'String'));
 handles.synapseLocator_figure.UserData.imageIntGMin = val;
 
@@ -1345,6 +1377,10 @@ function maxIntensityG_edit_Callback(hObject, eventdata, handles)
 
 % Hints: get(hObject,'String') returns contents of maxIntensityG_edit as text
 %        str2double(get(hObject,'String')) returns contents of maxIntensityG_edit as a double
+
+if isempty(handles.synapseLocator_figure.UserData.sLobj.data.G0)
+    return
+end
 
 val = str2double(get(hObject,'String'));
 handles.synapseLocator_figure.UserData.imageIntGMax = val;
@@ -1362,6 +1398,10 @@ function minIntensityR_edit_Callback(hObject, eventdata, handles)
 % Hints: get(hObject,'String') returns contents of minIntensityR_edit as text
 %        str2double(get(hObject,'String')) returns contents of minIntensityR_edit as a double
 
+if isempty(handles.synapseLocator_figure.UserData.sLobj.data.G0)
+    return
+end
+
 val = str2double(get(hObject,'String'));
 handles.synapseLocator_figure.UserData.imageIntRMin = val;
 
@@ -1378,6 +1418,10 @@ function maxIntensityR_edit_Callback(hObject, eventdata, handles)
 % Hints: get(hObject,'String') returns contents of maxIntensityR_edit as text
 %        str2double(get(hObject,'String')) returns contents of maxIntensityR_edit as a double
 
+if isempty(handles.synapseLocator_figure.UserData.sLobj.data.G0)
+    return
+end
+
 val = str2double(get(hObject,'String'));
 handles.synapseLocator_figure.UserData.imageIntRMax = val;
 
@@ -1393,15 +1437,9 @@ function image_input_radiobutton_Callback(hObject, eventdata, handles)
 
 % Hint: get(hObject,'Value') returns toggle state of image_input_1_radiobutton
 
-% Simply click zLevel slider!
-programmatic_zLevel(handles)
-
-return
-
-function image_uibuttongroup_SelectionChangedFcn(hObject, eventdata, handles)
-% hObject    handle to the selected object in image_uibuttongroup 
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
+if isempty(handles.synapseLocator_figure.UserData.sLobj.data.G0)
+    return
+end
 
 % Simply click zLevel slider!
 programmatic_zLevel(handles)
@@ -1413,6 +1451,10 @@ function spot_results_uibuttongroup_SelectionChangedFcn(hObject, eventdata, hand
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
+if isempty(handles.synapseLocator_figure.UserData.sLobj.data.G0)
+    return
+end
+
 % Simply click zLevel slider!
 programmatic_zLevel(handles)
 
@@ -1423,11 +1465,19 @@ function spot_uipanel_ButtonDownFcn(hObject, eventdata, handles)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
+if isempty(handles.synapseLocator_figure.UserData.sLobj.data.G0)
+    return
+end
+
 switch hObject.FontWeight
     case 'normal'
         hObject.FontWeight = 'bold';
+        handles.spot_class_radiobutton.Enable = 'on';
+        handles.spot_probs_radiobutton.Enable = 'on';
     case 'bold'
         hObject.FontWeight = 'normal';
+        handles.spot_class_radiobutton.Enable = 'off';
+        handles.spot_probs_radiobutton.Enable = 'off';
 end
 
 % Simply click zLevel slider!
@@ -1435,35 +1485,76 @@ programmatic_zLevel(handles)
 
 return
 
-function signal_results_uibuttongroup_SelectionChangedFcn(hObject, eventdata, handles)
-% hObject    handle to the selected object in signal_results_uibuttongroup 
+function label_results_uibuttongroup_SelectionChangedFcn(hObject, eventdata, handles)
+% hObject    handle to the selected object in label_results_uibuttongroup 
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
+if isempty(handles.synapseLocator_figure.UserData.sLobj.data.G0)
+    return
+end
+
 switch hObject.String
-    case 'Table'
-        % Allow user to pick individual signal entry from table and label!
-        % Make signal table visible!
+    case 'custom threshold'
+        % Allow user to pick individual label entry from table and indicate position!
+        % Make summary table visible!
+        summary = handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.UserData.tmpData;
+        if isempty(summary)
+            handles.labelsN_edit.String = '';
+        else
+            handles.labelsN_edit.String = num2str(height(handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.UserData.tmpData));
+        end
         handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.Visible = 'on';
         figure(handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH);
     otherwise
-        % Show all signals based on 'Signal Detection/Intensity threshold' criteria!
+        % Show all labels based on 'Label Report Expert' criteria!
+        N_ = sum(ge(...
+            handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary.rDelta_g0(~handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary.edge),...
+            handles.synapseLocator_figure.UserData.sLobj.dRG0Threshold));
+        handles.labelsN_edit.String = num2str(N_);
 end
 % Simply click zLevel slider!
 programmatic_zLevel(handles)
 
 return
 
-function signal_uipanel_ButtonDownFcn(hObject, eventdata, handles)
-% hObject    handle to signal_uipanel (see GCBO)
+function label_uipanel_ButtonDownFcn(hObject, eventdata, handles)
+% hObject    handle to label_uipanel (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
+
+if isempty(handles.synapseLocator_figure.UserData.sLobj.data.G0)
+    return
+end
 
 switch hObject.FontWeight
     case 'normal'
         hObject.FontWeight = 'bold';
+        handles.label_default_radiobutton.Enable = 'on';
+        handles.label_custom_radiobutton.Enable = 'on';
+        if handles.label_custom_radiobutton.Value
+            summary = handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.UserData.tmpData;
+            if isempty(summary)
+                handles.labelsN_edit.String = '';
+            else
+                handles.labelsN_edit.String = num2str(height(handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.UserData.tmpData));
+            end
+            handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.Visible = 'on';
+            figure(handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH);            
+        else
+            N_ = sum(ge(...
+                handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary.rDelta_g0(~handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary.edge),...
+                handles.synapseLocator_figure.UserData.sLobj.dRG0Threshold));
+            handles.labelsN_edit.String = num2str(N_);
+        end
     case 'bold'
         hObject.FontWeight = 'normal';
+        handles.label_default_radiobutton.Enable = 'off';
+        handles.label_custom_radiobutton.Enable = 'off';
+        N_ = sum(ge(...
+            handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary.rDelta_g0(~handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary.edge),...
+            handles.synapseLocator_figure.UserData.sLobj.dRG0Threshold));
+        handles.labelsN_edit.String = num2str(N_);
 end
 
 % Simply click zLevel slider!
@@ -1499,6 +1590,10 @@ imageMax = handles.synapseLocator_figure.UserData.imageMax.(channelGroup2use{:})
 imageIntMin = handles.synapseLocator_figure.UserData.(['imageInt', channelGroup2use{:}, 'Min']) * imageMax;
 imageIntMax = handles.synapseLocator_figure.UserData.(['imageInt', channelGroup2use{:}, 'Max']) * imageMax;
 
+if isempty(imageMax)
+    return
+end
+
 axes(handles.image_axes);
 xlim_ = [ceil(handles.image_axes.XLim(1)), floor(handles.image_axes.XLim(2))];
 % ylim_ = [ceil(handles.image_axes.YLim(1)), floor(handles.image_axes.YLim(2))];
@@ -1509,19 +1604,19 @@ else
     imagesc(ones(imgSize(1), imgSize(2)));
 end
 
-% Prepare to plot spots and/or signals!
-if strcmp(handles.spot_uipanel.FontWeight, 'bold') || strcmp(handles.signal_uipanel.FontWeight, 'bold')
+% Prepare to plot spots!
+if strcmp(handles.spot_uipanel.FontWeight, 'bold') || strcmp(handles.label_uipanel.FontWeight, 'bold')
     summary = handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary;
 end
 
 % Plot spots!
 if strcmp(handles.spot_uipanel.FontWeight, 'bold') && ~isempty(handles.synapseLocator_figure.UserData.sLobj.data.spot_predictedStack)
-    if strcmp(handles.spot_results_uibuttongroup.SelectedObject.String, 'Probs')
+    if strcmp(handles.spot_results_uibuttongroup.SelectedObject.String, 'Spot Voxels')
         tmpSpots = handles.synapseLocator_figure.UserData.sLobj.data.spot_classProbsStack(:,:,trueVal);
-        spotPlotMarker = 'o';
+        spotPlotMarker = 'x';
         spotPlotColor = [0.1,0.1,0.1];
         spotPlotMarkerFaceColor = [0.7,1,0.7];
-        spotPlotLineWidth = 0.02;
+        spotPlotLineWidth = 2;
         spotPlotSize = 1 * zFactor;
 
         hold on
@@ -1565,45 +1660,49 @@ if strcmp(handles.spot_uipanel.FontWeight, 'bold') && ~isempty(handles.synapseLo
     end    
 end
 
-% Plot signals!
-if strcmp(handles.signal_uipanel.FontWeight, 'bold')
+% Plot labels!
+if strcmp(handles.label_uipanel.FontWeight, 'bold')
+    % Prepare to plot labels!
+    switch handles.label_results_uibuttongroup.SelectedObject.String
+        case 'default threshold'
+            summary = handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary;
+            tmpIdx = ge(summary.rDelta_g0, handles.synapseLocator_figure.UserData.sLobj.dRG0Threshold);
+        case 'custom threshold'
+            summary = handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.UserData.tmpData;
+            if ~isempty(summary)
+                summary = table2dataset(summary);
+            else
+                summary = [];
+            end
+            tmpIdx = true(size(summary, 1), 1);
+    end
     if gt(numel(handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummary.Spot_ID), 0)
-        if ~strcmp(handles.signal_results_uibuttongroup.SelectedObject.String, 'Table')
-            if ~isempty(summary)                
-                switch handles.signal_results_uibuttongroup.SelectedObject.String
-                    case 'dR/Gx'
-                        tmpIdx = ge(summary.rDelta_gSum, handles.synapseLocator_figure.UserData.sLobj.dRGxThreshold);
-                    case 'G0 matched'
-                        tmpIdx = eq(summary.G0matched, 1);
-                    case 'generic matched'
-                        tmpIdx = eq(summary.Genericmatched, 1);
-                end
-                level = -2:1:2;
-                spotPlotSize = [1, 3, 5, 3, 1];
-                spotPlotSize = spotPlotSize * 0.9 * sqrt(zFactor);
-                spotPlotMarker = 'o';
-                spotPlotColor = [0.1,0.1,0.1];
-                spotPlotLineWidth = [0.2, 0.5, 1, 0.5, 0.2];
-                spotPlotMarkerFaceColor = [repmat(0.9, 5, 1), repmat(0.1, 5, 1), repmat(0.1, 5, 1)];
+        if ~isempty(summary)
+            level = -2:1:2;
+            spotPlotSize = [1, 3, 5, 3, 1];
+            spotPlotSize = spotPlotSize * 0.9 * sqrt(zFactor);
+            spotPlotMarker = 'o';
+            spotPlotColor = [0.1,0.1,0.1];
+            spotPlotLineWidth = [0.2, 0.5, 1, 0.5, 0.2];
+            spotPlotMarkerFaceColor = [repmat(0.9, 5, 1), repmat(0.1, 5, 1), repmat(0.1, 5, 1)];
+            
+            for idx = 1:numel(level)
+                tmpSpots = zeros(imgSize(1), imgSize(2));
+                tmpX = summary.row(eq(summary.section, trueVal + level(idx)) & tmpIdx);
+                tmpY = summary.column(eq(summary.section, trueVal + level(idx)) & tmpIdx);
+                tmpSpots(sub2ind(imgSize(1:2), tmpX, tmpY)) = 1;
                 
-                for idx = 1:numel(level)
-                    tmpSpots = zeros(imgSize(1), imgSize(2));
-                    tmpX = summary.row(eq(summary.section, trueVal + level(idx)) & tmpIdx);
-                    tmpY = summary.column(eq(summary.section, trueVal + level(idx)) & tmpIdx);
-                    tmpSpots(sub2ind(imgSize(1:2), tmpX, tmpY)) = 1;
-                    
-                    hold on
-                    spy(tmpSpots)
-                    hold off
-                    
-                    sH = findobj(handles.image_axes, 'Type', 'Line', '-and', 'Tag', '');
-                    sH.Color = spotPlotColor;
-                    sH.Marker = spotPlotMarker;
-                    sH.MarkerFaceColor = spotPlotMarkerFaceColor(idx,:);
-                    sH.MarkerSize = spotPlotSize(idx);
-                    sH.LineWidth = spotPlotLineWidth(idx);
-                    sH.Tag = 'done';
-                end
+                hold on
+                spy(tmpSpots)
+                hold off
+                
+                sH = findobj(handles.image_axes, 'Type', 'Line', '-and', 'Tag', '');
+                sH.Color = spotPlotColor;
+                sH.Marker = spotPlotMarker;
+                sH.MarkerFaceColor = spotPlotMarkerFaceColor(idx,:);
+                sH.MarkerSize = spotPlotSize(idx);
+                sH.LineWidth = spotPlotLineWidth(idx);
+                sH.Tag = 'done';
             end
         end
     end
@@ -1641,14 +1740,15 @@ end
 
 % Respond to entry selected in synapse locator summary table!
 appData = getappdata(hObject);
-if strcmp(handles.signal_uipanel.FontWeight, 'bold')
-    if strcmp(handles.signal_results_uibuttongroup.SelectedObject.String, 'Table')
+if strcmp(handles.label_uipanel.FontWeight, 'bold')
+    if strcmp(handles.label_results_uibuttongroup.SelectedObject.String, 'custom threshold')
         if isfield(appData, 'summaryTable_selection')
             if eq(appData.summaryTable_selection(3), trueVal)
                 hold on
                 plot(handles.image_axes, appData.summaryTable_selection(2), appData.summaryTable_selection(1), 'Marker', 'o', 'MarkerSize', 45, 'LineWidth', 3, 'MarkerEdgeColor', 'k', 'MarkerFaceColor', 'none', 'LineStyle', 'none')
                 hold off
             end
+            rmappdata(hObject, 'summaryTable_selection')
         end
     end
 end
@@ -1840,6 +1940,11 @@ function runLocator_pushbutton_Callback(hObject, eventdata, handles)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
+if isempty(handles.synapseLocator_figure.UserData.sLobj.register_CMD)
+    % Ooooops!
+    return
+end
+
 handles.synapseLocator_figure.Pointer = 'watch';
 
 notify(handles.synapseLocator_figure.UserData.sLobj, 'run', 'locator')
@@ -1862,36 +1967,12 @@ return
 
 %%
 % Show/save output %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-function summaryTable_pushbutton_Callback(hObject, eventdata, handles)
-% hObject    handle to summaryTable_pushbutton (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Make signal table visible!
-handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH.Visible = 'on';
-figure(handles.synapseLocator_figure.UserData.sLobj.synapseLocatorSummaryTableH);
-
-return
-
-% --- Executes on button press in summaryPlots_pushbutton.
-function summaryPlots_pushbutton_Callback(hObject, eventdata, handles)
-% hObject    handle to summaryPlots_pushbutton (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Show spots/signals intensity summary!
-handles.synapseLocator_figure.Pointer = 'watch';
-notify(handles.synapseLocator_figure.UserData.sLobj, 'summaryPlots')
-handles.synapseLocator_figure.Pointer = 'arrow';
-
-return
-
 function saveResults_pushbutton_Callback(hObject, eventdata, handles)
 % hObject    handle to saveResults_pushbutton (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Save detected spines info to file!
+% Save detected spots info to file!
 handles.synapseLocator_figure.Pointer = 'watch';
 notify(handles.synapseLocator_figure.UserData.sLobj, 'saveResults')
 handles.synapseLocator_figure.Pointer = 'arrow';
@@ -1985,7 +2066,6 @@ function upsampling_radiobutton_Callback(hObject, eventdata, handles)
 % hObject    handle to upsampling_radiobutton (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
-
 % Hint: get(hObject,'Value') returns toggle state of upsampling_radiobutton
 
 val = get(hObject, 'Value');
@@ -1995,52 +2075,8 @@ preProParamsChanged(handles)
 
 return
 
-function dRGxThreshold_edit_Callback(hObject, eventdata, handles)
-% hObject    handle to dRGxThreshold_edit (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
 
-val = str2double(get(hObject,'String'));
-handles.synapseLocator_figure.UserData.sLobj.dRGxThreshold = val;
 
-locatorParamsChanged(handles)
-
-return
-
-% --- Executes when selected object is changed in dRGx_uibuttongroup.
-function dRGx_uibuttongroup_SelectionChangedFcn(hObject, eventdata, handles)
-% hObject    handle to the selected object in dRGx_uibuttongroup 
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Set signal calculation!
-inputSelection = get(hObject, 'String');
-
-switch inputSelection
-    case 'dR/G0'
-        handles.synapseLocator_figure.UserData.sLobj.dRGx = 'dR/G0';
-    case 'dR/Gsum'
-        handles.synapseLocator_figure.UserData.sLobj.dRGx = 'dR/Gsum';
-end
-
-locatorParamsChanged(handles)
-
-return
-
-function G0matchThreshold_edit_Callback(hObject, eventdata, handles)
-% hObject    handle to G0matchThreshold_edit (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of G0matchThreshold_edit as text
-%        str2double(get(hObject,'String')) returns contents of G0matchThreshold_edit as a double
-
-val = str2double(get(hObject,'String'));
-handles.synapseLocator_figure.UserData.sLobj.G0matchThreshold = val;
-
-locatorParamsChanged(handles)
-
-return
 
 
 
