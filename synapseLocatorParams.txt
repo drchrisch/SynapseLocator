@@ -1,0 +1,104 @@
+# Synapse Locator Parameter File, 15jan2020
+#
+# Synapse Locator directory
+synapseLocatorFolder, ''
+#
+# Elastix File locations
+#elastixFolder, elastix\elastix_v4.8
+elastixFolder, elastix\elastixProgram
+elastixParamsFolder, elastix\elastixParams
+elastixParamsSet, default
+initialTransformParametersFile, initialTransform_parameters.txt
+translationParameterFile, translation_parameters_default.txt
+rotationParameterFile, rotation_parameters_default.txt
+affineParameterFile, affine_parameters_default.txt
+elasticParameterFile, elastic_parameters_default.txt
+#
+#
+# ImageJ program (absolute path)
+IJ_exe, C:\fiji.app\ImageJ-win64.exe
+#
+# ImageJ macros (relative path)
+IJMacrosFolder, IJ\IJ1Macros
+preprocessMacro, preprocess.ijm
+scaleMacro, scaleIt.ijm
+featureMakerMacro, featureMaker.ijm
+featureMakerSignalChannelMacro, featureMakerSignalChannel.ijm
+gatherOutputMacro, gatherTifs.ijm
+#
+#
+# Weka models
+# wekaModels directory must contain "SL_genericSpotModel_s.model" (plus "~_Data.csv") as default model for spots!
+wekaModelsFolder, wekaModels
+genericSpotModel, SL_genericSpotModel_s
+#
+#
+# Synapse Locator parameter
+leadingChannel, G
+loadRegisteredImages, 0
+transformRawData, 1
+initialTransform, 0
+medianFilter, 1
+# medianFilterParams, [1.0 1.0 1.0]
+medianFilterParams, [1.0 1.0 0.0]
+gaussianSmooth, 0
+gaussianSmoothParams, [0.5]
+bandpassFilter, 1
+# bandpassFilterParams, [3 25]
+bandpassFilterParams, [2 100]
+subtractBackground, 1
+subtractBackgroundParams, [250]
+deconvolve, 1
+# deconvolveParams, [0.01]
+deconvolveParams, [0.001]
+#deconvolveParams, [1e-10]
+deconvolveParams_PSF, [0.4 0.4 2.0]
+vxlSize, [0.146 0.146 0.5]
+#vxlSize, [0.2 0.2 0.5]
+imgSize, [0 0 0]
+filterImages, 1
+sum2, 0
+upsampling, 0
+#
+#
+# Set visually estimated similarity between image stacks {'good', 'average', 'poor'}
+apparentSimilarity, average
+# Set degree of marker content {'high', 'medium', 'low''}
+markerDensity, medium
+histogramN, 64
+FGSIV, 4
+FBSIO, 1
+resolutionsN, 3
+#
+#
+# Set registration run mode {'default', 'quick'}
+registrationRunMode, default
+displayChannel, G0
+data1Threshold, 0
+data2Threshold, 0
+g0_threshold, 0
+g1_threshold, 0
+bwconncompValue, 26
+spotSpecificity, 0.5
+signalSpecificity, 0.5
+#
+#
+# Set expected spot size (in pixels)
+spotSizeMin, [2 2 1]
+spotSizeMax, [10 10 5]
+# Set average spot size (in pixels) {'small', 'medium', 'large'}
+avgSpotSize, small
+# Set dR/G0 label threshold
+dRG0Threshold, 0.25
+# Exclude spots centered at image stack boundary
+excludeSpotsAtEdges, 1
+#
+#
+# Set fields to report in output
+#summaryFields, "Spot_ID, row, column, section, spotMatch, spotMatch_probs, Genericmatched, Genericmatched_probs, diameter_x, diameter_y, diameter_z, bb_x, bb_y, bb_z, N, G0_max, R0_max, G1_max, R1_max, G0_sum, R0_sum, G1_sum, R1_sum, G0_mean, R0_mean, G1_mean, R1_mean, G0_median, R0_median, G1_median, R1_median, G0_max_norm, R0_max_norm, G1_max_norm, R1_max_norm, G0_sum_norm, R0_sum_norm, G1_sum_norm, R1_sum_norm, g_ratio, r_ratio, rg_pre, rg_post, r_delta, r_factor, rDelta_gSum, rDelta_g0, g0g1_match, g0r1_match, g1r1_match, g0r0_match, r0r1_match, pval_g0g1, pval_g0r1, pval_g1r1, pval_g0r0, pval_r0r1, VoxelIDs, VoxelIDs2"
+summaryFields, "Spot_ID, row, column, section, spotMatch, spotMatch_probs, diameter_x, diameter_y, diameter_z, bb_x, bb_y, bb_z, N, G0_max, R0_max, G1_max, R1_max, G0_sum, R0_sum, G1_sum, R1_sum, G0_mean, R0_mean, G1_mean, R1_mean, G0_median, R0_median, G1_median, R1_median, g_ratio, r_ratio, rg_pre, rg_post, r_delta, r_factor, rDelta_gSum, rDelta_g0, g0g1_match, g0r1_match, g1r1_match, g0r0_match, r0r1_match, edge, outlier, VoxelIDs, VoxelIDs2"
+#summaryTableFields, "Spot_ID, row, column, section, G0_max_norm, R0_max_norm, G1_max_norm, R1_max_norm, spotMatch, spotMatch_probs, Genericmatched, Genericmatched_probs, r_factor, rDelta_gSum, rDelta_g0, g_ratio, r_ratio, rg_pre, rg_post, r_delta, diameter_x, diameter_y, diameter_z"
+summaryTableFields, "Spot_ID, row, column, section, G0_max, R0_max, G1_max, R1_max, r_factor, rDelta_gSum, rDelta_g0, g_ratio, r_ratio, rg_pre, rg_post, r_delta, diameter_x, diameter_y, diameter_z, spotMatch_probs, g0g1_match, g0r1_match, g1r1_match, g0r0_match, r0r1_match"
+compositeTif, 1
+
+
