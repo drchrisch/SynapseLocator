@@ -28,9 +28,9 @@ gatherOutputMacro, gatherTifs.ijm
 #
 #
 # Weka models
-# wekaModels directory must contain "SL_genericSpotModel_s.model" (plus "~_Data.csv") as default model for spots!
+# wekaModels directory must contain "SL_genericSpotModel.model" (plus "~_Data.csv") as default model for spots!
 wekaModelsFolder, wekaModels
-genericSpotModel, SL_genericSpotModel_s
+genericSpotModel, SL_genericSpotModel
 #
 #
 # Synapse Locator parameter
