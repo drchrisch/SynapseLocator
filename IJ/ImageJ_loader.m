@@ -22,13 +22,21 @@ classpath = javaclasspath('-all');
 warning_state = warning();
 warning('off')
 
-add_to_classpath(classpath, fullfile(IJ_dir, 'jars'));
-add_to_classpath(classpath, fullfile(IJ_dir, 'plugins'));
+% Look for kind of 'weka-dev-3.9.1.jar' in fiji
+wekas = dir(fullfile(IJ_dir, 'jars'));
+wekas = cellfun(@(x) regexp(x, 'weka.*.jar$', 'match'), ({wekas.name}), 'Uni', 0); % looks for kind of 'weka-dev-3.9.1.jar' in fiji 
+if ~any(cellfun(@(x) ~isempty(x), wekas))
+    error('WEKALAB:wekaPathCheck:PathNotFound', 'Weka.jar not found!');
+else
+    % wekas = cell2mat(wekas{(cellfun(@(x) ~isempty(x), wekas))});
+    % javaaddpath(fullfile(IJ_dir, 'jars', wekas), '-end');
+	add_to_classpath(classpath, fullfile(IJ_dir, 'jars'));
+	add_to_classpath(classpath, fullfile(IJ_dir, 'plugins'));
 
-% Set the Fiji directory (and plugins.dir which is not Fiji.app/plugins/)
-javaMethod('setProperty', 'java.lang.System', 'ij.dir', IJ_dir);
-javaMethod('setProperty', 'java.lang.System', 'plugins.dir', IJ_dir);
-
+	% Set the Fiji directory (and plugins.dir which is not Fiji.app/plugins/)
+	javaMethod('setProperty', 'java.lang.System', 'ij.dir', IJ_dir);
+	javaMethod('setProperty', 'java.lang.System', 'plugins.dir', IJ_dir);
+end
 % Switch warning back to initial settings
 warning(warning_state)
 
