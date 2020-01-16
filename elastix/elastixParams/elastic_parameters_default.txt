@@ -31,7 +31,7 @@
 (UseDirectionCosines "true")
 
 // Consider initial transformation
-(InitialTransformParametersFileName "NoInitialTransform")
+//(InitialTransformParametersFileName "NoInitialTransform")
 
 // Whether transforms are combined by composition or by addition.
 // In generally, Compose is the best option in most cases.
@@ -276,10 +276,12 @@
 // FixedKernelBSplineOrder: The B-spline order of the Parzen window, used to estimate the joint histogram. Can be given for each resolution, or for all resolutions at once.
 // example: (FixedKernelBSplineOrder 0 1 1)
 // The default value is 0.
+(FixedKernelBSplineOrder 1)
 
 // MovingKernelBSplineOrder: The B-spline order of the Parzen window, used to estimate the joint histogram. Can be given for each resolution, or for all resolutions at once.
 // example: (MovingKernelBSplineOrder 3 3 3)
 // The default value is 3.
+(MovingKernelBSplineOrder 3)
 
 // FixedLimitRangeRatio: The relative extension of the intensity range of the fixed image.
 // If your fixed image has grey values from a to b and the FixedLimitRangeRatio is 0.001, the joint histogram will expect fixed image grey values from a-0.001(b-a) to b+0.001(b-a). This may be useful if you use high order B-spline interpolator for the fixed image.
