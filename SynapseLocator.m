@@ -15,13 +15,20 @@ function SynapseLocator()
 
 
 if isempty(findobj('Name', 'Synapse Locator'))
+    % Read parameters from file and set fields in synLoc object!
+    mFile = which(mfilename, '-all');
+    % Check for single installation!
+    if ne(numel(mFile), 1)
+        opts = struct('WindowStyle', 'modal', 'Interpreter', 'tex');
+        warndlg('\color{red} More than one installation of SynapseLocator found!', 'Installation Warning', opts);
+        return
+    end
+    
     % Create waitbar to track process of application!
     wbH = waitbar(0, 'Starting Synapse Locator GUI...', 'Name', 'Synapse Locator Initialization', 'WindowStyle', 'modal', 'Pointer', 'watch');
 
-    % Read parameters from file and set fields in synLoc object!
-    mFile = which(mfilename, '-all');    
-    [mPath,~,~] = fileparts(mFile{:});    
-    paramsFile = dir(fullfile(mPath, 'synapseLocatorParams.csv'));
+    [mPath,~,~] = fileparts(mFile{:});
+    paramsFile = dir(fullfile(mPath, 'synapseLocatorParams.txt'));
     paramsFile = fullfile(mPath, paramsFile.name);
     params_ = table2struct(readtable(paramsFile, 'readVariableNames', 0, 'Delimiter', ',', 'CommentStyle', '#'));
     params = struct('SynapseLocatorParameterFile', paramsFile);
